@@ -1,0 +1,2 @@
+# Ignore the gomoku_model directory during function deployment
+/get-ai-move/gomoku_model

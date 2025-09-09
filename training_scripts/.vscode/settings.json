@@ -1,0 +1,11 @@
+{
+    // 이 프로젝트에서는 Deno 확장 기능을 사용하지 않도록 설정합니다.
+    "deno.enable": false,
+    "deno.lint": false,
+    "deno.unstable": false,
+
+    // TypeScript 파일에 대해 VS Code의 기본 기능을 사용하도록 설정합니다.
+    "[typescript]": {
+        "editor.defaultFormatter": "vscode.typescript-language-features"
+    }
+}

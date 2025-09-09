@@ -1,0 +1,5 @@
+# Ignore node_modules directory to ensure a clean npm install inside the container
+node_modules
+
+# Ignore npm debug logs
+npm-debug.log

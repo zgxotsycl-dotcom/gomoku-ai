@@ -1,0 +1,34 @@
+{
+  "name": "gomoku-ai-training",
+  "version": "1.0.0",
+  "description": "Scripts for training the Gomoku AI neural network.",
+  "main": "train_nn.js",
+  "type": "commonjs",
+  "scripts": {
+    "create-model": "tsc && node dist/create_initial_model.js",
+    "train": "tsc && node dist/train_nn.js",
+    "start-self-play": "tsc && node dist/self_play_trainer.js",
+    "predict": "tsc && node dist/predict.js",
+    "pretrain": "tsc && node dist/pretrain_from_knowledge.js",
+    "build": "tsc",
+    "evaluate": "tsc && node dist/evaluate_models.js",
+    "evaluate:docker": "docker run --gpus all --rm -v %CD%\\gomoku_model:/app/gomoku_model -v %CD%\\gomoku_model_prod:/app/gomoku_model_prod gomoku-trainer npm run evaluate",
+    "start:pipeline": "tsc && node dist/start_pipeline.js",
+    "start:final": "docker run --gpus all --rm -v %CD%\\replay_buffer:/app/replay_buffer -v %CD%\\training_checkpoints:/app/training_checkpoints -v %CD%\\model_main:/app/model_main -v %CD%\\replay_buffer_archive:/app/replay_buffer_archive -v %CD%\\training_checkpoints_archive:/app/training_checkpoints_archive gomoku-trainer",
+    "start:server": "docker run --gpus all --rm -p 8080:8080 -v %CD%\\model_main:/app/model_main gomoku-trainer node dist/server.js",
+    "start:training": "docker run --gpus all --rm -v %CD%\\model_main:/app/model_main -v %CD%\\replay_buffer:/app/replay_buffer -v %CD%\\training_checkpoints:/app/training_checkpoints -v %CD%\\replay_buffer_archive:/app/replay_buffer_archive -v %CD%\\training_checkpoints_archive:/app/training_checkpoints_archive gomoku-trainer"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.0",
+    "@tensorflow/tfjs-node-gpu": "4.19.0",
+    "dotenv": "^17.2.2",
+    "fastify": "^4.28.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.13",
+    "typescript": "^5.9.2"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
