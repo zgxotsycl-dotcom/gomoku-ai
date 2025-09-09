@@ -6,8 +6,23 @@
 ecosystem.config.js
 
 # Node modules
-node_modules
+node_modules/
 
 # Deno lock files
 deno.lock
-"training_scripts/ai_knowledge_export.csv" 
+
+# Training artifacts and large data files
+/training_scripts/ai_knowledge_export.csv
+/training_scripts/training_data.jsonl
+/training_scripts/replay_buffer/
+/training_scripts/replay_buffer_archive/
+/training_scripts/training_checkpoints/
+/training_scripts/training_checkpoints_archive/
+/training_scripts/model_main/
+/training_scripts/gomoku_model/
+/training_scripts/gomoku_model_prod/
+
+# IDE and OS specific
+.vscode/
+.idea/
+.DS_Store
