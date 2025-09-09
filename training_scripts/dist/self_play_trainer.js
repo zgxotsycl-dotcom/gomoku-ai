@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const node_worker_threads_1 = require("node:worker_threads");
 const path = __importStar(require("node:path"));
 const fs = __importStar(require("node:fs"));
-const NUM_WORKERS = 4; // Adjust based on your CPU cores
+const NUM_WORKERS = 7; // Adjust based on your CPU cores
 const SAVE_INTERVAL_MS = 60000; // Save data every 60 seconds
 const OUTPUT_FILE = './training_data.jsonl';
 const MODEL_DIR = './gomoku_model';
@@ -62,28 +62,34 @@ async function runManager() {
             console.error("[Manager] Failed to save batch:", err);
         }
     }
-    // Save data periodically
     setInterval(saveBatchToFile, SAVE_INTERVAL_MS);
-    console.log(`[Manager] Starting ${NUM_WORKERS} parallel game workers...`);
-    for (let i = 0; i < NUM_WORKERS; i++) {
-        // Node.js requires the compiled .js file for the worker.
+    const createWorker = (workerId) => {
+        console.log(`[Manager] Creating worker ${workerId}...`);
         const workerScriptPath = path.resolve(__dirname, '../dist/game_worker.js');
-        const worker = new node_worker_threads_1.Worker(workerScriptPath, { workerData: { workerId: i } });
+        const worker = new node_worker_threads_1.Worker(workerScriptPath, { workerData: { workerId } });
         worker.on('message', (data) => {
             if (data.trainingSamples) {
                 trainingDataBatch.push(...data.trainingSamples);
-                console.log(`[Worker ${i}] Game finished. Received ${data.trainingSamples.length} samples. Batch size: ${trainingDataBatch.length}`);
+                console.log(`[Worker ${workerId}] Game finished. Received ${data.trainingSamples.length} samples. Batch size: ${trainingDataBatch.length}`);
+                // Start a new game in the same worker
+                worker.postMessage('start_new_game');
             }
         });
-        worker.on('error', (err) => console.error(`[Worker ${i}] Error:`, err));
+        worker.on('error', (err) => {
+            console.error(`[Worker ${workerId}] FATAL ERROR:`, err);
+        });
         worker.on('exit', (code) => {
+            console.log(`[Worker ${workerId}] exited with code ${code}.`);
             if (code !== 0) {
-                console.error(`[Worker ${i}] stopped with exit code ${code}. Restarting...`);
-                // Optional: Restart worker on failure
+                console.error(`[Worker ${workerId}] stopped unexpectedly. Restarting after 5 seconds...`);
+                setTimeout(() => createWorker(workerId), 5000);
             }
         });
+    };
+    console.log(`[Manager] Starting ${NUM_WORKERS} parallel game workers...`);
+    for (let i = 0; i < NUM_WORKERS; i++) {
+        createWorker(i);
     }
-    // Handle graceful shutdown
     process.on('SIGINT', () => {
         console.log('\n[Manager] Shutdown signal received. Saving remaining data...');
         saveBatchToFile();

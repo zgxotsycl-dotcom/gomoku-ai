@@ -1,7 +1,8 @@
 "use strict";
 /**
- * @file Gomoku AI Logic - MCTS (Monte Carlo Tree Search)
+ * @file Gomoku AI Logic - MCTS (Monte Carlo Tree Search) (Memory Safe)
  * This file contains the core AI engine, now upgraded with a Neural Network-guided MCTS.
+ * This version includes tf.tidy() to prevent GPU memory leaks during MCTS simulations.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -37,7 +38,6 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loadModel = loadModel;
 exports.getOpponent = getOpponent;
 exports.checkWin = checkWin;
 exports.getPossibleMoves = getPossibleMoves;
@@ -45,21 +45,6 @@ exports.findBestMoveNN = findBestMoveNN;
 const tf = __importStar(require("@tensorflow/tfjs-node-gpu"));
 // --- Constants ---
 const BOARD_SIZE = 19;
-// --- Global Model Variable ---
-let gomokuModel = null;
-/**
- * Loads the trained TensorFlow.js model. Ensures the model is loaded only once.
- */
-async function loadModel() {
-    if (gomokuModel) {
-        return gomokuModel;
-    }
-    const modelJsonPath = './gomoku_model/model.json';
-    console.log(`Loading model from ${modelJsonPath}...`);
-    gomokuModel = await tf.loadLayersModel(tf.io.fileSystem(modelJsonPath));
-    console.log('Gomoku model loaded successfully.');
-    return gomokuModel;
-}
 // --- Helper Functions ---
 function getOpponent(player) {
     return player === 'black' ? 'white' : 'black';
@@ -114,35 +99,27 @@ function getPossibleMoves(board, radius = 1) {
         return [r, c];
     });
 }
-/**
- * Converts a board state into a 4D tensor suitable for the neural network.
- * Shape: [1, BOARD_SIZE, BOARD_SIZE, 3]
- * Channel 0: Current player's stones
- * Channel 1: Opponent's stones
- * Channel 2: Color to play (1 for black, 0 for white)
- */
 function boardToInputTensor(board, player) {
-    const opponent = player === 'black' ? 'white' : 'black';
-    const playerChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
-    const opponentChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            if (board[r][c] === player) {
-                playerChannel[r][c] = 1;
-            }
-            else if (board[r][c] === opponent) {
-                opponentChannel[r][c] = 1;
+    return tf.tidy(() => {
+        const opponent = player === 'black' ? 'white' : 'black';
+        const playerChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
+        const opponentChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
+        for (let r = 0; r < BOARD_SIZE; r++) {
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                if (board[r][c] === player)
+                    playerChannel[r][c] = 1;
+                else if (board[r][c] === opponent)
+                    opponentChannel[r][c] = 1;
             }
         }
-    }
-    const colorChannelValue = player === 'black' ? 1 : 0;
-    const colorChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(colorChannelValue));
-    const stackedChannels = tf.stack([
-        tf.tensor2d(playerChannel),
-        tf.tensor2d(opponentChannel),
-        tf.tensor2d(colorChannel)
-    ], 2); // stack along the last axis to get shape [19, 19, 3]
-    return stackedChannels.expandDims(0); // add batch dimension -> [1, 19, 19, 3]
+        const colorChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(player === 'black' ? 1 : 0));
+        const stackedChannels = tf.stack([
+            tf.tensor2d(playerChannel),
+            tf.tensor2d(opponentChannel),
+            tf.tensor2d(colorChannel)
+        ], 2);
+        return stackedChannels.expandDims(0);
+    });
 }
 // --- NN-Guided MCTS Implementation ---
 class MCTSNodeNN {
@@ -177,7 +154,6 @@ class MCTSNodeNN {
         for (const move of possibleMoves) {
             const [r, c] = move;
             const moveIndex = r * BOARD_SIZE + c;
-            // Ensure the move is valid and not already a child
             if (policy[moveIndex] > 0 && !(moveIndex in this.children)) {
                 this.children[moveIndex] = new MCTSNodeNN(getOpponent(this.player), this, move, policy[moveIndex]);
             }
@@ -188,7 +164,7 @@ class MCTSNodeNN {
         while (node) {
             node.visits++;
             node.valueSum += value;
-            value = -value; // The value is from the perspective of the child, so it's inverted for the parent.
+            value = -value;
             node = node.parent;
         }
     }
@@ -196,45 +172,41 @@ class MCTSNodeNN {
 async function findBestMoveNN(model, board, player, timeLimit) {
     const startTime = Date.now();
     const root = new MCTSNodeNN(player);
-    // Initial prediction for the root node
-    const rootInputTensor = boardToInputTensor(board, player);
-    const [rootPolicyTensor, rootValueTensor] = model.predict(rootInputTensor);
-    const rootPolicy = await rootPolicyTensor.data();
-    tf.dispose([rootInputTensor, rootPolicyTensor, rootValueTensor]);
-    root.expand(board, rootPolicy);
-    let simulationCount = 0;
+    const rootPolicyData = tf.tidy(() => {
+        const rootInputTensor = boardToInputTensor(board, player);
+        const [rootPolicyTensor] = model.predict(rootInputTensor);
+        return rootPolicyTensor.dataSync();
+    });
+    root.expand(board, rootPolicyData);
     while (Date.now() - startTime < timeLimit) {
-        if (simulationCount % 100 === 0 && simulationCount > 0) {
-            console.log(`AI is thinking... Simulation #${simulationCount}`);
-        }
         const currentBoard = board.map(row => [...row]);
         let node = root;
-        // --- Selection ---
         while (Object.keys(node.children).length > 0) {
             node = node.selectChild();
             currentBoard[node.move[0]][node.move[1]] = node.parent.player;
         }
-        // --- Expansion & Evaluation ---
         const lastMove = node.move;
         const lastPlayer = node.parent?.player;
         let value;
         if (lastMove && lastPlayer && checkWin(currentBoard, lastPlayer, lastMove)) {
-            value = -1; // The parent player won, so this node is a loss for the current player.
+            value = -1;
         }
         else if (getPossibleMoves(currentBoard, 2).length === 0) {
-            value = 0; // Draw
+            value = 0;
         }
         else {
-            const inputTensor = boardToInputTensor(currentBoard, node.player);
-            const [policyTensor, valueTensor] = model.predict(inputTensor);
-            const policy = await policyTensor.data();
-            value = (await valueTensor.data())[0];
-            tf.dispose([inputTensor, policyTensor, valueTensor]);
+            const { policy, value: predictedValue } = tf.tidy(() => {
+                const inputTensor = boardToInputTensor(currentBoard, node.player);
+                const [policyTensor, valueTensor] = model.predict(inputTensor);
+                return {
+                    policy: policyTensor.dataSync(),
+                    value: valueTensor.dataSync()[0]
+                };
+            });
+            value = predictedValue;
             node.expand(currentBoard, policy);
         }
-        // --- Backpropagation ---
         node.backpropagate(value);
-        simulationCount++;
     }
     if (Object.keys(root.children).length === 0) {
         const moves = getPossibleMoves(board);

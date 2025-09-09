@@ -38,7 +38,8 @@ const tf = __importStar(require("@tensorflow/tfjs-node-gpu"));
 const ai_1 = require("./src/ai");
 const BOARD_SIZE = 19;
 const MODEL_PATH = './gomoku_model';
-const MCTS_THINK_TIME = 2000; // 셀프플레이에서는 한 수당 2초씩 생각
+const MCTS_THINK_TIME = 2000; // 2 seconds per move in self-play
+const EXPLORATION_MOVES = 15; // Number of moves to use temperature sampling for exploration
 let model = null;
 async function loadModel() {
     if (model)
@@ -57,8 +58,7 @@ function checkWin(board, player, move) {
         let count = 1;
         for (const [dr, dc] of dir) {
             for (let i = 1; i < 5; i++) {
-                const newR = r + dr * i;
-                const newC = c + dc * i;
+                const newR = r + dr * i, newC = c + dc * i;
                 if (newR >= 0 && newR < BOARD_SIZE && newC >= 0 && newC < BOARD_SIZE && board[newR][newC] === player) {
                     count++;
                 }
@@ -75,7 +75,6 @@ function checkWin(board, player, move) {
 function getOpponent(player) {
     return player === 'black' ? 'white' : 'black';
 }
-// --- Main Self-Play Game Logic ---
 async function runSelfPlayGame() {
     if (!model) {
         console.error(`[Worker ${node_worker_threads_1.workerData.workerId}] Model not loaded! Exiting.`);
@@ -84,11 +83,10 @@ async function runSelfPlayGame() {
     let board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
     let player = 'black';
     const history = [];
-    for (let i = 0; i < (BOARD_SIZE * BOARD_SIZE); i++) {
+    for (let moveCount = 0; moveCount < (BOARD_SIZE * BOARD_SIZE); moveCount++) {
         const { bestMove, policy: mctsPolicy } = await (0, ai_1.findBestMoveNN)(model, board, player, MCTS_THINK_TIME);
         if (!bestMove || bestMove[0] === -1)
             break; // No more moves
-        // Create the policy target for training
         const policyTarget = new Array(BOARD_SIZE * BOARD_SIZE).fill(0);
         let totalVisits = 0;
         mctsPolicy.forEach(p => totalVisits += p.visits);
@@ -99,13 +97,31 @@ async function runSelfPlayGame() {
             });
         }
         history.push({ state: JSON.parse(JSON.stringify(board)), player, policy: policyTarget });
-        board[bestMove[0]][bestMove[1]] = player;
-        if (checkWin(board, player, bestMove)) {
-            // Game ended, assign results and send back
+        let chosenMove;
+        // Check if there is more than one move to choose from for exploration
+        if (moveCount < EXPLORATION_MOVES && mctsPolicy.length > 1) {
+            // --- Exploration: Use temperature sampling --- 
+            const moves = mctsPolicy.map(p => p.move);
+            const probabilities = mctsPolicy.map(p => p.visits / totalVisits);
+            // Create a 2D tensor of log-probabilities directly to ensure type safety.
+            const logits = tf.tidy(() => tf.tensor2d([probabilities]).log());
+            const moveIndexTensor = tf.multinomial(logits, 1);
+            const moveIndex = moveIndexTensor.dataSync()[0];
+            chosenMove = moves[moveIndex];
+            // Dispose intermediate tensors
+            logits.dispose();
+            moveIndexTensor.dispose();
+        }
+        else {
+            // --- Exploitation: Use the best move ---
+            chosenMove = bestMove;
+        }
+        board[chosenMove[0]][chosenMove[1]] = player;
+        if (checkWin(board, player, chosenMove)) {
             const winner = player;
             const trainingSamples = history.map(h => ({
                 ...h,
-                value: h.player === winner ? 1 : -1, // Value from the perspective of the player in that state
+                value: h.player === winner ? 1 : -1,
             }));
             node_worker_threads_1.parentPort?.postMessage({ trainingSamples });
             return;
@@ -116,7 +132,6 @@ async function runSelfPlayGame() {
     const trainingSamples = history.map(h => ({ ...h, value: 0 }));
     node_worker_threads_1.parentPort?.postMessage({ trainingSamples });
 }
-// --- Worker Initialization ---
 node_worker_threads_1.parentPort?.on('message', async (msg) => {
     if (msg === 'start_new_game') {
         try {
@@ -127,7 +142,6 @@ node_worker_threads_1.parentPort?.on('message', async (msg) => {
         }
     }
 });
-// Load the model once when the worker starts, then start the first game.
 loadModel().then(() => {
     runSelfPlayGame();
 }).catch(e => {
