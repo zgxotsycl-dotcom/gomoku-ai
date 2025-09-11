@@ -1,0 +1,21 @@
+# Dependencies
+/node_modules
+/dist
+
+# Data
+/ai_knowledge_export.csv
+/training_data.jsonl
+/replay_buffer/
+/replay_buffer_archive/
+/training_checkpoints/
+/training_checkpoints_archive/
+/model_main/
+/gomoku_model/
+/gomoku_model_prod/
+
+# Logs
+npm-debug.log*
+nohup.out
+
+# OS-specific
+.DS_Store

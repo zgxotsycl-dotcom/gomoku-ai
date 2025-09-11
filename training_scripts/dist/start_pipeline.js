@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 // --- Configuration ---
-const NUM_WORKERS = 4;
+const NUM_WORKERS = 5;
 const SCRIPTS = {
     worker: path.resolve(__dirname, '../dist/worker_selfplay.js'),
     trainer: path.resolve(__dirname, '../dist/trainer.js'),

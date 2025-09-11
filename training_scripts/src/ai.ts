@@ -4,7 +4,7 @@
  * This version includes tf.tidy() to prevent GPU memory leaks during MCTS simulations.
  */
 
-import * as tf from '@tensorflow/tfjs-node-gpu';
+import * as tf from '@tensorflow/tfjs-node';
 
 // --- Type Definitions ---
 export type Player = 'black' | 'white';

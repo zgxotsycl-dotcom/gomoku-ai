@@ -2,7 +2,7 @@
 /**
  * @file Standalone Evaluation Worker
  * This script runs in an infinite loop, continuously checking for new model checkpoints,
- * evaluating them against the current best model, and promoting the challenger if it's stronger,
+ * evaluating them against the current best model, promoting the challenger if it's stronger,
  * and automatically deploying the new champion model to Supabase Storage.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -48,12 +48,12 @@ const ai_1 = require("./src/ai");
 const MAIN_MODEL_PATH = './model_main';
 const CHECKPOINT_PATH = './training_checkpoints';
 const ARCHIVE_PATH = './training_checkpoints_archive';
-const EVAL_INTERVAL_MS = 15 * 60 * 1000; // Check for new checkpoints every 15 minutes
+const EVAL_INTERVAL_MS = 15 * 60 * 1000;
 const BOARD_SIZE = 19;
 // --- Evaluation Parameters ---
-const NUM_GAMES = 50; // Must be an even number
-const MCTS_THINK_TIME = 1000; // 1 second per move for fast evaluation
-const PROMOTION_THRESHOLD = 0.55; // Challenger must win >55% of games
+const NUM_GAMES = 50;
+const MCTS_THINK_TIME = 1000;
+const PROMOTION_THRESHOLD = 0.55;
 // --- Supabase Configuration ---
 const SUPABASE_URL = 'https://xkwgfidiposftwwasdqs.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhrd2dmaWRpcG9zZnR3d2FzZHFzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUwODM3NzMsImV4cCI6MjA3MDY1OTc3M30.-9n_26ga07dXFiFOShP78_p9cEcIKBxHBEYJ1A1gaiE';
@@ -92,12 +92,12 @@ async function uploadModelToSupabase(modelDir) {
         const weightsBinContent = await fs.readFile(path.join(modelDir, 'weights.bin'));
         const { error: jsonError } = await supabase.storage
             .from('models')
-            .upload('gomoku_model/model.json', modelJsonContent, { upsert: true });
+            .upload('gomoku_model/model.json', modelJsonContent, { upsert: true, contentType: 'application/json' });
         if (jsonError)
             throw new Error(`Failed to upload model.json: ${jsonError.message}`);
         const { error: weightsError } = await supabase.storage
             .from('models')
-            .upload('gomoku_model/weights.bin', weightsBinContent, { upsert: true });
+            .upload('gomoku_model/weights.bin', weightsBinContent, { upsert: true, contentType: 'application/octet-stream' });
         if (weightsError)
             throw new Error(`Failed to upload weights.bin: ${weightsError.message}`);
         console.log('[Uploader] Successfully uploaded new model to Supabase Storage.');

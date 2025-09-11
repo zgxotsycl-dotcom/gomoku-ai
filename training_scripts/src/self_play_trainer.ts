@@ -1,65 +1,63 @@
-import path from 'node:path';
-import { Worker, isMainThread } from 'node:worker_threads';
-import fs from 'node:fs';
+import { Worker } from 'node:worker_threads';
+import * as path from 'path';
+import * as fs from 'fs';
 
-const NUM_WORKERS = 4; // Start with a reasonable number
-const SAVE_INTERVAL_MS = 60000; // 1 minute
-// Output file in the root of the training_scripts directory
-const OUTPUT_FILE = path.resolve(__dirname, '../../training_data.jsonl');
+const NUM_WORKERS = 3; // Adjusted for stability
+const SAVE_INTERVAL_MS = 60000; // Save data every 60 seconds
+const OUTPUT_FILE = './training_data.jsonl';
+const MODEL_DIR = './model_main';
 
-async function runParallelSelfPlay() {
-    console.log('--- Go-Moku AI Self-Play Trainer ---');
-    console.log(`Outputting training data to: ${OUTPUT_FILE}`);
-    let trainingDataBatch: any[] = [];
+async function runManager() {
+    console.log('--- AI Self-Play Training Manager ---');
 
-    function ensureFileSync(filePath: string) {
-        const dirname = path.dirname(filePath);
-        if (!fs.existsSync(dirname)) {
-            fs.mkdirSync(dirname, { recursive: true });
-        }
+    if (!fs.existsSync(MODEL_DIR)) {
+        console.error(`Error: Model directory not found at ${MODEL_DIR}`);
+        return;
     }
+
+    let trainingDataBatch: any[] = [];
 
     function saveBatchToFile() {
         if (trainingDataBatch.length === 0) return;
-        console.log(`Saving ${trainingDataBatch.length} new training samples...`);
+        console.log(`[Manager] Saving batch of ${trainingDataBatch.length} new training samples...`);
         const data = trainingDataBatch.map(s => JSON.stringify(s)).join('\n') + '\n';
-        trainingDataBatch = [];
+        trainingDataBatch = []; // Clear the batch
         try {
-            ensureFileSync(OUTPUT_FILE);
             fs.appendFileSync(OUTPUT_FILE, data);
-            console.log(`Successfully saved to ${OUTPUT_FILE}`);
-        } catch (err) { console.error("Failed to save batch:", err); }
+            console.log(`[Manager] Successfully saved samples to ${OUTPUT_FILE}`);
+        } catch (err) {
+            console.error("[Manager] Failed to save batch:", err);
+        }
     }
 
     setInterval(saveBatchToFile, SAVE_INTERVAL_MS);
 
-    console.log(`Starting ${NUM_WORKERS} parallel game workers...`);
+    console.log(`[Manager] Starting ${NUM_WORKERS} parallel game workers...`);
+
     for (let i = 0; i < NUM_WORKERS; i++) {
-        // The worker path should be the compiled JS file in the same directory
-        const workerPath = path.join(__dirname, 'game_worker.js');
-        const worker = new Worker(workerPath);
+        const workerScriptPath = path.resolve(__dirname, '../dist/worker_selfplay.js');
+        const worker = new Worker(workerScriptPath, { workerData: { workerId: i } });
 
         worker.on('message', (data) => {
-            const { trainingSamples } = data;
-            if (trainingSamples) {
-                trainingDataBatch.push(...trainingSamples);
-                console.log(`Worker ${i}: Game finished. Received ${trainingSamples.length} samples. Total in batch: ${trainingDataBatch.length}`);
-                // Start a new game in the same worker
-                worker.postMessage('start_new_game');
+            if (data.trainingSamples) {
+                trainingDataBatch.push(...data.trainingSamples);
+                console.log(`[Worker ${i}] Game finished. Received ${data.trainingSamples.length} samples. Batch size: ${trainingDataBatch.length}`);
             }
         });
 
-        worker.on('error', (err) => console.error(`Worker ${i} error:`, err));
+        worker.on('error', (err) => console.error(`[Worker ${i}] Error:`, err));
         worker.on('exit', (code) => {
-            if (code !== 0) console.error(`Worker ${i} stopped with exit code ${code}`);
+            if (code !== 0) {
+                console.error(`[Worker ${i}] stopped with exit code ${code}. Restarting...`);
+            }
         });
     }
 
-    // Keep the main thread alive
-    // This is a bit of a hack, but it works for a long-running script.
-    await new Promise(() => {});
+    process.on('SIGINT', () => {
+        console.log('\n[Manager] Shutdown signal received. Saving remaining data...');
+        saveBatchToFile();
+        process.exit(0);
+    });
 }
 
-if (isMainThread) {
-    runParallelSelfPlay().catch(e => console.error("Critical error in manager:", e));
-}
+runManager();

@@ -2,7 +2,7 @@ import { fork } from 'child_process';
 import * as path from 'path';
 
 // --- Configuration ---
-const NUM_WORKERS = 4;
+const NUM_WORKERS = 5;
 
 const SCRIPTS = {
     worker: path.resolve(__dirname, '../dist/worker_selfplay.js'),
