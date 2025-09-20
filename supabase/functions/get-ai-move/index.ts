@@ -1,72 +1,86 @@
 import { createClient } from '@supabase/supabase-js';
 import { corsHeaders } from '../_shared/cors.ts';
-import { findBestMoveNN, Player } from '../_shared/ai.ts';
-import * as tf from '@tensorflow/tfjs-node';
+import type { Player } from '../_shared/ai.ts';
 
-// --- Model Loading ---
-const MODEL_URL = 'https://xkwgfidiposftwwasdqs.supabase.co/storage/v1/object/public/models/gomoku_model/model.json';
-let model: tf.LayersModel | null = null;
-
-async function loadModel() {
-    if (model) return model;
-    // Always load from the official URL. Local fallback is removed.
-    console.log(`Loading model from ${MODEL_URL}...`);
-    model = await tf.loadLayersModel(MODEL_URL);
-    console.log("Model loaded successfully from URL.");
-    return model;
-}
-
-// Pre-load the model when the function instance starts.
-const modelLoadPromise = loadModel();
+// This Edge Function proxies to external AI server (Node) for inference.
+const AI_SERVER_URL = Deno.env.get('AI_SERVER_URL') ?? 'https://ai.omokk.com/get-move';
 
 const boardToString = (board: (Player | null)[][]) => board.map(row => row.map(cell => cell ? cell[0] : '-').join('')).join('|');
+
+// --- Symmetry helpers for opening book ---
+type TransformId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+const INV_T: Record<TransformId, TransformId> = { 0: 0, 1: 3, 2: 2, 3: 1, 4: 4, 5: 5, 6: 6, 7: 7 };
+function transformRC(r: number, c: number, size: number, t: TransformId): [number, number] {
+  const n = size;
+  switch (t) {
+    case 0: return [r, c];
+    case 1: return [c, n - 1 - r];
+    case 2: return [n - 1 - r, n - 1 - c];
+    case 3: return [n - 1 - c, r];
+    case 4: return [r, n - 1 - c];
+    case 5: return [n - 1 - r, c];
+    case 6: return [c, r];
+    case 7: return [n - 1 - c, n - 1 - r];
+  }
+}
+function transformBoardHash(hash: string, t: TransformId): string {
+  const rows = hash.split('|');
+  const n = rows.length;
+  const out: string[] = Array(n).fill('');
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const [rr, cc] = transformRC(r, c, n, t);
+      const ch = rows[r][c];
+      const row = out[rr] || ''.padEnd(n, ' ');
+      out[rr] = (row.substring(0, cc) + ch + row.substring(cc + 1)).padEnd(n, ' ');
+    }
+  }
+  return out.map(s => s.trim().padEnd(n, '-').substring(0, n)).join('|');
+}
+function getSymmetricHashes(board: (Player | null)[][]): Array<{ hash: string; t: TransformId }> {
+  const base = boardToString(board);
+  const trans: TransformId[] = [0,1,2,3,4,5,6,7];
+  return trans.map(t => ({ hash: transformBoardHash(base, t), t }));
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { board, player, moves } = await req.json();
+    const { board, player, moves = [], turnEndsAt, timeLeftMs, turnLimitMs } = await req.json();
     if (!board || !player) throw new Error("Missing 'board' or 'player' in request body.");
-
-    const loadedModel = await modelLoadPromise;
-    if (!loadedModel) {
-        throw new Error("AI model is not available. Cannot process the request.");
-    }
 
     const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', { auth: { persistSession: false } });
 
-    // Use opening book for the first 12 moves
+    // Use opening book for the first 12 moves (symmetry-aware)
     if (moves.length <= 12) {
-      const boardHash = boardToString(board);
-      const { data: bookMove } = await supabaseAdmin.from('ai_opening_book').select('best_move').eq('board_hash', boardHash).single();
-      if (bookMove?.best_move && board[bookMove.best_move[0]][bookMove.best_move[1]] === null) {
-          console.log("Found move in Opening Book:", bookMove.best_move);
-          return new Response(JSON.stringify({ move: bookMove.best_move }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+      const cands = getSymmetricHashes(board);
+      const hashes = cands.map(c => c.hash);
+      const { data: rows, error: bookErr } = await supabaseAdmin.from('ai_opening_book').select('board_hash,best_move').in('board_hash', hashes).limit(1);
+      if (!bookErr && rows && rows.length > 0) {
+        const row = rows[0] as { board_hash: string; best_move: [number, number] };
+        const match = cands.find(c => c.hash === row.board_hash);
+        let mv = row.best_move as [number, number];
+        if (match) {
+          const invT = INV_T[match.t];
+          const [r, c] = transformRC(mv[0], mv[1], board.length, invT);
+          mv = [r, c];
+        }
+        if (board[mv[0]]?.[mv[1]] === null) {
+          console.log("Found move in Opening Book(sym):", mv);
+          return new Response(JSON.stringify({ move: mv }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
       }
     }
 
-    // Increased thinking time for stronger play
-    const EARLY_GAME_MOVES = 6;
-    const EARLY_GAME_THINK_TIME = 5000;  // 5 seconds
-    const MID_GAME_THINK_TIME = 15000; // 15 seconds
-    const LATE_GAME_THINK_TIME = 10000; // 10 seconds (to avoid timeout in complex endgames)
-    
-    let thinkTime;
-    if (moves.length <= EARLY_GAME_MOVES) {
-        thinkTime = EARLY_GAME_THINK_TIME;
-    } else if (moves.length <= 30) { // Mid-game
-        thinkTime = MID_GAME_THINK_TIME;
-    } else { // Late-game
-        thinkTime = LATE_GAME_THINK_TIME;
+    // Proxy to external AI server, include timing hints if available
+    const rsp = await fetch(AI_SERVER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ board, player, moves, turnEndsAt, timeLeftMs, turnLimitMs }) });
+    if (!rsp.ok) {
+      const txt = await rsp.text();
+      throw new Error(`AI server error: ${rsp.status} ${txt}`);
     }
-
-    console.log(`Calculating move for ${player}. Using NN-MCTS with Time Limit: ${thinkTime}ms...`);
-    
-    const { bestMove } = await findBestMoveNN(loadedModel, board, player as Player, thinkTime);
-    
-    console.log(`NN-MCTS calculation complete. Best move:`, bestMove);
-
-    return new Response(JSON.stringify({ move: bestMove }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+    const data = await rsp.json();
+    return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error in get-ai-move.";
     console.error("Error in get-ai-move function:", errorMessage);

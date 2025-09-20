@@ -1,0 +1,16 @@
+services:
+  trainer:
+    environment:
+      - FOREVER=true
+      - PIPELINE_CYCLES=0
+      # shorten stages for multiple cycles quickly
+      - SELF_PLAY_DURATION_MS=20000
+      - NUM_WORKERS=4
+      - MCTS_THINK_TIME_MS=800
+      - RUN_DISTILLATION=true
+      - EPOCHS=1
+      - STEPS_PER_EPOCH=5
+      # arena speed + promotion to exercise upload/book stages
+      - ARENA_GAMES=1
+      - ARENA_THINK_TIME=10
+      - WINRATE_THRESHOLD=0.0

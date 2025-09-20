@@ -1,0 +1,12 @@
+{
+  "ts": "2025-09-16T06:01:07.665Z",
+  "games": 6,
+  "candidate_wins": 2,
+  "prod_wins": 4,
+  "draws": 0,
+  "winrate": 0.3333333333333333,
+  "candidate_fingerprint": "af96edb51f23",
+  "prod_fingerprint": "af96edb51f23",
+  "threshold": 0.55,
+  "promoted": false
+}

@@ -1,0 +1,44 @@
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+# Install Node.js 20 (LTS) and build tools
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg python3 make g++ \
+ && install -d -m 0755 /etc/apt/keyrings \
+ && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+ && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+ && apt-get update && apt-get install -y nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package manifests first (better cache)
+COPY package*.json ./
+
+# Switch dependency to GPU build and install
+# Use npm alias to map '@tensorflow/tfjs-node' to tfjs-node-gpu in this image
+RUN npm pkg set dependencies.'@tensorflow/tfjs-node'='npm:@tensorflow/tfjs-node-gpu@4.22.0' \
+ && npm install
+
+# Copy the rest of the source
+COPY . .
+
+# Build TypeScript
+RUN npm run build
+
+# Persist data across restarts
+VOLUME ["/app/replay_buffer", "/app/gomoku_model_prod", "/app/past_models", "/app/logs"]
+
+# Reasonable defaults (can be overridden)
+ENV BOARD_SIZE=15 \
+    FOREVER=true \
+    RUN_DISTILLATION=true \
+    GATING_ENABLED=true \
+    UPLOAD_MODEL_AFTER=true \
+    AUTO_GENERATE_OPENING_BOOK=true \
+    IMPORT_OPENING_BOOK=true \
+    PIPELINE_CYCLES=0 \
+    PIPELINE_INTERVAL_MS=0 \
+    TF_FORCE_GPU_ALLOW_GROWTH=1
+
+# Start infinite training pipeline
+CMD ["node", "dist/start_pipeline.js"]

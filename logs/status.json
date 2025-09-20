@@ -1,0 +1,21 @@
+{
+  "ts": "2025-09-19T21:14:19.186Z",
+  "phase": "book_import_start",
+  "cycle": 1,
+  "error": "import_book: Error: Import Opening Book into Supabase failed with code 1",
+  "selfPlay": {
+    "workers": 1
+  },
+  "book": {
+    "entries": 1,
+    "imported": true
+  },
+  "arena": {
+    "played": 6,
+    "total": 6,
+    "candWins": 2,
+    "prodWins": 4,
+    "draws": 0,
+    "promoted": false
+  }
+}

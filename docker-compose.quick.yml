@@ -1,0 +1,15 @@
+services:
+  trainer:
+    environment:
+      # Shorten cycle for quick end-to-end validation
+      - FOREVER=false
+      - PIPELINE_CYCLES=1
+      - SELF_PLAY_DURATION_MS=60000
+      - RUN_DISTILLATION=true
+      - EPOCHS=1
+      - STEPS_PER_EPOCH=50
+      # Keep board/model defaults
+      - BOARD_SIZE=15
+      - RESIDUAL_BLOCKS=5
+      - CONV_FILTERS=64
+      - L2_REGULARIZATION=0.0001

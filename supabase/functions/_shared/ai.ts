@@ -8,10 +8,11 @@ import * as tf from '@tensorflow/tfjs-node';
 
 // --- Type Definitions ---
 export type Player = 'black' | 'white';
+export type Move = [number, number];
 export type PolicyData = { move: [number, number], visits: number };
 
 // --- Constants ---
-const BOARD_SIZE = 19;
+function getBoardSize(board: (Player | null)[][]): number { return board.length; }
 
 // --- Helper Functions ---
 
@@ -22,6 +23,7 @@ export function getOpponent(player: Player): Player {
 export function checkWin(board: (Player | null)[][], player: Player, move: [number, number]): boolean {
   if (!move || move[0] === -1) return false;
   const [r, c] = move;
+  const BOARD_SIZE = getBoardSize(board);
   const directions = [[[0, 1], [0, -1]], [[1, 0], [-1, 0]], [[1, 1], [-1, -1]], [[-1, 1], [1, -1]]];
   for (const dir of directions) {
     let count = 1;
@@ -39,6 +41,7 @@ export function checkWin(board: (Player | null)[][], player: Player, move: [numb
 }
 
 function boardToInputTensor(board: (Player | null)[][], player: Player): tf.Tensor4D {
+    const BOARD_SIZE = getBoardSize(board);
     const opponent = player === 'black' ? 'white' : 'black';
     const playerChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
     const opponentChannel = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
@@ -54,66 +57,81 @@ function boardToInputTensor(board: (Player | null)[][], player: Player): tf.Tens
         tf.tensor2d(playerChannel),
         tf.tensor2d(opponentChannel),
         tf.tensor2d(colorChannel)
-    ], 2); // stack along the last axis to get shape [19, 19, 3]
+    ], 2); // stack along the last axis to get shape [N, N, 3]
 
-    return stackedChannels.expandDims(0) as tf.Tensor4D; // add batch dimension -> [1, 19, 19, 3]
+    return stackedChannels.expandDims(0) as tf.Tensor4D; // add batch dimension -> [1, N, N, 3]
 }
 
-export function getPossibleMoves(board: (Player | null)[][], radius = 1): [number, number][] {
-    const moves: Set<string> = new Set();
-    let hasStones = false;
-    for (let r = 0; r < BOARD_SIZE; r++) {
-        for (let c = 0; c < BOARD_SIZE; c++) {
-            if (board[r][c] !== null) {
-                hasStones = true;
-                for (let i = -radius; i <= radius; i++) {
-                    for (let j = -radius; j <= radius; j++) {
-                        const newR = r + i; const newC = c + j;
-                        if (newR >= 0 && newR < BOARD_SIZE && newC >= 0 && newC < BOARD_SIZE && board[newR][newC] === null) {
-                            moves.add(`${newR},${newC}`);
-                        }
-                    }
-                }
+export function getPossibleMoves(board: (Player|null)[][], radius = 1): Move[] {
+  const BOARD_SIZE = getBoardSize(board);
+  const moves = new Set<string>();
+  let hasStones = false;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] !== null) {
+        hasStones = true;
+        for (let i = -radius; i <= radius; i++) {
+          for (let j = -radius; j <= radius; j++) {
+            const nr = r + i, nc = c + j;
+            if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === null) {
+              moves.add(`${nr},${nc}`);
             }
+          }
         }
+      }
     }
-    if (!hasStones) return [[Math.floor(BOARD_SIZE / 2), Math.floor(BOARD_SIZE / 2)]];
-    return Array.from(moves).map(move => {
-        const [r, c] = move.split(',').map(Number);
-        return [r, c] as [number, number];
-    });
+  }
+  if (!hasStones) return [[Math.floor(BOARD_SIZE/2), Math.floor(BOARD_SIZE/2)]];
+  return [...moves].map(s => {
+    const [r, c] = s.split(',').map(Number);
+    return [r, c] as Move;
+  });
 }
 
 // --- NN-Guided MCTS Implementation ---
+
+function hasEmpty(board: (Player|null)[][]): boolean {
+  const BOARD_SIZE = getBoardSize(board);
+  for (let r = 0; r < BOARD_SIZE; r++)
+    for (let c = 0; c < BOARD_SIZE; c++)
+      if (board[r][c] === null) return true;
+  return false;
+}
 
 class MCTSNodeNN {
     parent: MCTSNodeNN | null;
     children: { [moveIndex: number]: MCTSNodeNN };
     player: Player;
-    move: [number, number] | null;
+    move: Move | null;
     prior: number;
     visits: number;
     valueSum: number;
+    depth: number;
 
-    constructor(player: Player, parent: MCTSNodeNN | null = null, move: [number, number] | null = null, prior = 0) {
+    constructor(player: Player, parent: MCTSNodeNN | null = null, move: Move | null = null, prior = 0) {
         this.player = player; this.parent = parent; this.move = move;
         this.children = {}; this.visits = 0; this.valueSum = 0; this.prior = prior;
+        this.depth = parent ? parent.depth + 1 : 0;
     }
 
     get value(): number {
         return this.visits === 0 ? 0 : this.valueSum / this.visits;
     }
 
-    selectChild(): MCTSNodeNN {
-        const c_puct = 1.5;
-        let bestScore = -Infinity;
-        let bestChild: MCTSNodeNN | null = null;
-        const sqrtTotalVisits = Math.sqrt(this.visits);
-        for (const child of Object.values(this.children)) {
-            const puctScore = child.value + c_puct * child.prior * (sqrtTotalVisits / (1 + child.visits));
-            if (puctScore > bestScore) { bestScore = puctScore; bestChild = child; }
-        }
-        return bestChild!;
+    selectChild(): MCTSNodeNN | null {
+      const c_puct = this.depth < 20 ? 2.0 : 1.5;
+      const kids = Object.values(this.children);
+      if (kids.length === 0) return null;
+      const sqrtN = Math.sqrt(Math.max(1, this.visits));
+      let best: MCTSNodeNN | null = null;
+      let bestScore = -Infinity;
+      for (const child of kids) {
+        const qFromParent = -child.value; // 관점 변환
+        const u = c_puct * child.prior * (sqrtN / (1 + child.visits));
+        const score = qFromParent + u;
+        if (score > bestScore) { bestScore = score; best = child; }
+      }
+      return best;
     }
 
     expand(board: (Player | null)[][], policy: Float32Array): void {
@@ -137,7 +155,7 @@ class MCTSNodeNN {
     }
 }
 
-export async function findBestMoveNN(model: tf.LayersModel, board: (Player | null)[][], player: Player, timeLimit: number): Promise<{ bestMove: [number, number], policy: PolicyData[] }> {
+export async function findBestMoveNN(model: tf.LayersModel, board: (Player | null)[][], player: Player, timeLimit: number): Promise<{ bestMove: Move, policy: PolicyData[] }> {
     const startTime = Date.now();
     const root = new MCTSNodeNN(player);
 
@@ -151,12 +169,14 @@ export async function findBestMoveNN(model: tf.LayersModel, board: (Player | nul
     let simulationCount = 0;
     while (Date.now() - startTime < timeLimit) {
         const currentBoard = board.map(row => [...row]);
-        let node = root;
+        let node: MCTSNodeNN | null = root;
 
         while (Object.keys(node.children).length > 0) {
             node = node.selectChild();
+            if (!node) break;
             currentBoard[node.move![0]][node.move![1]] = node.parent!.player;
         }
+        if (!node) continue; // Should not happen if logic is correct
 
         const lastMove = node.move;
         const lastPlayer = node.parent?.player;
@@ -164,7 +184,7 @@ export async function findBestMoveNN(model: tf.LayersModel, board: (Player | nul
 
         if (lastMove && lastPlayer && checkWin(currentBoard, lastPlayer, lastMove)) {
             value = -1; // The parent player won, so this node is a loss for the current player.
-        } else if (getPossibleMoves(currentBoard, 2).length === 0) {
+        } else if (!hasEmpty(currentBoard)) {
             value = 0; // Draw
         } else {
             const inputTensor = boardToInputTensor(currentBoard, node.player);
@@ -184,7 +204,7 @@ export async function findBestMoveNN(model: tf.LayersModel, board: (Player | nul
         return { bestMove: moves.length > 0 ? moves[0] : [-1, -1], policy: [] };
     }
 
-    let bestMove: [number, number] | null = null;
+    let bestMove: Move | null = null;
     let maxVisits = -1;
     for (const child of Object.values(root.children)) {
         if (child.visits > maxVisits) {
@@ -197,4 +217,65 @@ export async function findBestMoveNN(model: tf.LayersModel, board: (Player | nul
         bestMove: bestMove!,
         policy: Object.values(root.children).map(child => ({ move: child.move!, visits: child.visits }))
     };
+}
+
+// Zobrist hashing removed for dynamic board size (unused)
+
+export function findThreats(board: (Player | null)[][], player: Player, threatType: 'open-four' | 'four'): Move[] {
+    const BOARD_SIZE = getBoardSize(board);
+    const threats: Move[] = [];
+    const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+    for (let r_start = 0; r_start < BOARD_SIZE; r_start++) {
+        for (let c_start = 0; c_start < BOARD_SIZE; c_start++) {
+            for (const [dr, dc] of directions) {
+                const pos: Move[] = [];
+                let playerCount = 0;
+                let emptyCell: Move | null = null;
+
+                // Create a line of 5
+                for (let i = 0; i < 5; i++) {
+                    const r = r_start + i * dr;
+                    const c = c_start + i * dc;
+                    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) {
+                        playerCount = -1;
+                        break;
+                    }
+                    pos.push([r, c]);
+                    const cell = board[r][c];
+                    if (cell === player) {
+                        playerCount++;
+                    } else if (cell === null) {
+                        if (emptyCell !== null) { // more than one empty cell
+                            playerCount = -1;
+                            break;
+                        }
+                        emptyCell = [r, c];
+                    } else { // opponent
+                        playerCount = -1;
+                        break;
+                    }
+                }
+
+                if (playerCount === 4 && emptyCell) {
+                    if (threatType === 'four') {
+                        threats.push(emptyCell);
+                    } else if (threatType === 'open-four') {
+                        const start = pos[0];
+                        const end = pos[4];
+                        const beforeR = start[0] - dr;
+                        const beforeC = start[1] - dc;
+                        const afterR = end[0] + dr;
+                        const afterC = end[1] + dc;
+                        
+                        const openEnds = (board[beforeR]?.[beforeC] === null) && (board[afterR]?.[afterC] === null);
+                        if (openEnds) {
+                            threats.push(emptyCell);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return threats;
 }

@@ -1,0 +1,70 @@
+services:
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    image: gomoku-ai-trainer:gpu
+    container_name: gomoku-ai-trainer-gpu
+    restart: unless-stopped
+    runtime: nvidia
+    gpus: all
+    env_file:
+      - .env.supabase
+    environment:
+      - BOARD_SIZE=15
+      - RESIDUAL_BLOCKS=5
+      - CONV_FILTERS=64
+      - L2_REGULARIZATION=0.0001
+      - FOREVER=true
+      - RUN_DISTILLATION=true
+      - GATING_ENABLED=true
+      - UPLOAD_MODEL_AFTER=true
+      - AUTO_GENERATE_OPENING_BOOK=true
+      - IMPORT_OPENING_BOOK=true
+      - PIPELINE_CYCLES=0
+      - PIPELINE_INTERVAL_MS=0
+      - TF_USE_GPU=1
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      # Optional: try mixed precision (may improve throughput on some GPUs)
+      - TF_MIXED_PRECISION=0
+      # Increase parallelism / workload (tuned to reduce CPU heat)
+      - NUM_WORKERS=8
+      - MCTS_THINK_TIME_MS=3200
+      - SELF_PLAY_DURATION_MS=600000
+      - VCT_MAX_DEPTH=5
+      - SYM_AUG_ROOT=8
+      - MCTS_BATCH_SIZE=16
+      - K_ROOT_CAP=256
+      - K_CHILD_BASE=24
+      - K_CHILD_STEP=12
+      - K_CHILD_MAX=128
+      - DIRICHLET_ALPHA=0.12
+      - DIRICHLET_EPS=0.25
+      # TensorFlow threading hints (reduce contention/heat)
+      - TF_NUM_INTRAOP_THREADS=8
+      - TF_NUM_INTEROP_THREADS=2
+      - OMP_NUM_THREADS=8
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Provide Supabase creds here or via env file
+      # - SUPABASE_URL=...
+      # - SUPABASE_SERVICE_ROLE_KEY=...
+    volumes:
+      - replay_buffer:/app/replay_buffer
+      - prod_models:/app/gomoku_model_prod
+      - past_models:/app/past_models
+      - logs:/app/logs
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  replay_buffer:
+  prod_models:
+  past_models:
+  logs:

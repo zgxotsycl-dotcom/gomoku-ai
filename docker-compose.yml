@@ -1,0 +1,52 @@
+services:
+  trainer:
+    build: .
+    image: gomoku-ai-trainer:latest
+    container_name: gomoku-ai-trainer
+    restart: unless-stopped
+    environment:
+      - BOARD_SIZE=15
+      - FOREVER=true
+      - RUN_DISTILLATION=true
+      - GATING_ENABLED=true
+      - UPLOAD_MODEL_AFTER=true
+      - AUTO_GENERATE_OPENING_BOOK=true
+      - IMPORT_OPENING_BOOK=true
+      - PIPELINE_CYCLES=0
+      - PIPELINE_INTERVAL_MS=0
+      # Increase parallelism / workload (CPU mode)
+      - NUM_WORKERS=8
+      - MCTS_THINK_TIME_MS=3200
+      - SELF_PLAY_DURATION_MS=600000
+      - VCT_MAX_DEPTH=5
+      - SYM_AUG_ROOT=8
+      - MCTS_BATCH_SIZE=16
+      - K_ROOT_CAP=256
+      - K_CHILD_BASE=24
+      - K_CHILD_STEP=12
+      - K_CHILD_MAX=128
+      - DIRICHLET_ALPHA=0.12
+      - DIRICHLET_EPS=0.25
+      - TF_NUM_INTRAOP_THREADS=8
+      - TF_NUM_INTEROP_THREADS=2
+      - OMP_NUM_THREADS=8
+      # Provide Supabase creds here or via env file
+      # - SUPABASE_URL=...
+      # - SUPABASE_SERVICE_ROLE_KEY=...
+    volumes:
+      - replay_buffer:/app/replay_buffer
+      - prod_models:/app/gomoku_model_prod
+      - past_models:/app/past_models
+      - logs:/app/logs
+    ports:
+      - "8090:8090"
+    # If you also want to expose the inference server, uncomment:
+    # ports:
+    #   - "8080:8080"
+    # command: ["node", "dist/server.js"]
+
+volumes:
+  replay_buffer:
+  prod_models:
+  past_models:
+  logs:

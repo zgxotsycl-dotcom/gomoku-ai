@@ -1,0 +1,79 @@
+name: fun
+services:
+  trainer:
+    build:
+      context: C:\Users\DANIEL\Desktop\Fun
+      dockerfile: Dockerfile.gpu
+    container_name: gomoku-ai-trainer-gpu
+    environment:
+      AUTO_GENERATE_OPENING_BOOK: "true"
+      BOARD_SIZE: "15"
+      DIRICHLET_ALPHA: "0.12"
+      DIRICHLET_EPS: "0.25"
+      FOREVER: "true"
+      GATING_ENABLED: "true"
+      IMPORT_OPENING_BOOK: "true"
+      K_CHILD_BASE: "24"
+      K_CHILD_MAX: "128"
+      K_CHILD_STEP: "12"
+      K_ROOT_CAP: "256"
+      MCTS_BATCH_SIZE: "16"
+      MCTS_THINK_TIME_MS: "3200"
+      NUM_WORKERS: "8"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      NVIDIA_VISIBLE_DEVICES: all
+      OMP_NUM_THREADS: "8"
+      PIPELINE_CYCLES: "0"
+      PIPELINE_INTERVAL_MS: "0"
+      RUN_DISTILLATION: "true"
+      SELF_PLAY_DURATION_MS: "600000"
+      SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhrd2dmaWRpcG9zZnR3d2FzZHFzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTA4Mzc3MywiZXhwIjoyMDcwNjU5NzczfQ.eogwLg8qEHah1KenIWEcQMkU0ZYB3FomB4Bk0FTpcj4
+      SUPABASE_URL: https://xkwgfidiposftwwasdqs.supabase.co
+      SYM_AUG_ROOT: "8"
+      TF_FORCE_GPU_ALLOW_GROWTH: "true"
+      TF_NUM_INTEROP_THREADS: "2"
+      TF_NUM_INTRAOP_THREADS: "8"
+      TF_USE_GPU: "1"
+      UPLOAD_MODEL_AFTER: "true"
+      VCT_MAX_DEPTH: "5"
+    gpus:
+      - count: -1
+    image: gomoku-ai-trainer:gpu
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 8090
+        published: "8090"
+        protocol: tcp
+    restart: unless-stopped
+    runtime: nvidia
+    volumes:
+      - type: volume
+        source: replay_buffer
+        target: /app/replay_buffer
+        volume: {}
+      - type: volume
+        source: prod_models
+        target: /app/gomoku_model_prod
+        volume: {}
+      - type: volume
+        source: past_models
+        target: /app/past_models
+        volume: {}
+      - type: volume
+        source: logs
+        target: /app/logs
+        volume: {}
+networks:
+  default:
+    name: fun_default
+volumes:
+  logs:
+    name: fun_logs
+  past_models:
+    name: fun_past_models
+  prod_models:
+    name: fun_prod_models
+  replay_buffer:
+    name: fun_replay_buffer

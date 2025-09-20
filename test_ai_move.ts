@@ -13,32 +13,20 @@ async function testGetAiMove() {
     "Content-Type": "application/json",
   };
 
+  const size = 15;
+  const emptyRow = Array(size).fill(null);
+  const emptyBoard = Array(size).fill(null).map(() => emptyRow.slice());
+  // place two stones near center
+  const mid = Math.floor(size / 2);
+  emptyBoard[mid - 1][mid - 1] = "black" as const;
+  emptyBoard[mid][mid] = "white" as const;
+
   const body = {
-    board: [
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, "black", null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, "white", null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-      [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
-    ],
+    board: emptyBoard,
     player: "black",
     moves: [
-      [8, 8],
-      [9, 9],
+      [mid - 1, mid - 1],
+      [mid, mid],
     ],
   };
 
