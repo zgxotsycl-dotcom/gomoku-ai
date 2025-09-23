@@ -1,0 +1,725 @@
+import { useReducer, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { GameMode, GameState, Profile, Game, Player, Move, AIKnowledge } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
+import { findForbiddenMoves } from '../gomokuRules';
+import io, { Socket } from 'socket.io-client';
+import toast from 'react-hot-toast';
+import { supabase } from '../supabaseClient';
+import openingBook from '../opening_book.json';
+
+const BOARD_SIZE = Number(process.env.NEXT_PUBLIC_BOARD_SIZE || 15);
+const K_FACTOR = 32;
+const BASE_TURN_TIME = 5000;
+const TIME_INCREMENT = 1000;
+const MAX_TURN_TIME = 30000;
+const AI_THINK_TIME_BUFFER = 1200; // ms
+
+const formatDuration = (totalSeconds: number) => {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    return `${minutes}m ${seconds}s`;
+};
+
+const checkWin = (board: (Player | null)[][], player: Player, row: number, col: number): {row: number, col: number}[] | null => {
+    const directions = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: -1 }];
+    for (const dir of directions) {
+        let line = [{row, col}];
+        let count = 1;
+        for (let i = 1; i < 5; i++) {
+            const newRow = row + i * dir.y; const newCol = col + i * dir.x;
+            if (newRow < 0 || newRow >= board.length || newCol < 0 || newCol >= board.length || board[newRow][newCol] !== player) break;
+            line.push({row: newRow, col: newCol});
+            count++;
+        }
+        for (let i = 1; i < 5; i++) {
+            const newRow = row - i * dir.y; const newCol = col - i * dir.x;
+            if (newRow < 0 || newRow >= board.length || newCol < 0 || newCol >= board.length || board[newRow][newCol] !== player) break;
+            line.push({row: newRow, col: newCol});
+            count++;
+        }
+        if (count >= 5) return line.slice(0, 5);
+    }
+    return null;
+};
+
+const calculateElo = (playerRating: number, opponentRating: number, score: 1 | 0 | 0.5) => {
+    const expectedScore = 1 / (1 + Math.pow(10, (opponentRating - playerRating) / 400));
+    return Math.round(playerRating + K_FACTOR * (score - expectedScore));
+};
+const initialState = {
+    gameMode: 'pvp' as GameMode,
+    gameState: 'waiting' as GameState,
+    board: Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)) as (Player | null)[][],
+    currentPlayer: 'black' as Player,
+    winner: null as Player | null,
+    history: [] as Move[],
+    winningLine: null as {row: number, col: number}[] | null,
+    forbiddenMoves: [] as {row: number, col: number}[],
+    startTime: null as number | null,
+    gameDuration: "",
+    aiPlayer: 'white' as Player,
+    difficulty: 'normal' as 'easy' | 'normal',
+    isPrivateGame: false,
+    room: '',
+    playerRole: null as Player | null,
+    isSpectator: false,
+    userProfile: null as Profile | null,
+    opponentProfile: null as Profile | null,
+    activeEmoticon: null as { id: number, fromId: string, emoticon: string } | null,
+    emoticonCooldown: false,
+    replayMoveIndex: 0,
+    isReplaying: false,
+    turnTimeLimit: BASE_TURN_TIME,
+    turnTimeRemaining: BASE_TURN_TIME,
+    onlineUsers: 0,
+    inQueueUsers: 0,
+    createdRoomId: null as string | null,
+    showRoomCodeModal: false,
+    isSocketConnected: false,
+    aiKnowledge: null as AIKnowledge | null,
+    isWhatIfMode: false,
+    whatIfBoard: null as (Player | null)[][] | null,
+    isAiThinking: false,
+    whatIfPlayer: 'black' as Player,
+    whatIfWinner: null as Player | null,
+    whatIfWinningLine: null as {row: number, col: number}[] | null,
+    whatIfLastMove: null as Move | null,
+    isWinningShake: false, // ADDED
+    showColorSelect: false as boolean,
+    pendingOpening: 'none' as 'none' | 'white_extra2' | 'white_extra1',
+    startAnimKey: 0,
+    rematchSwap2Pending: false,
+};
+
+type Action =
+    | { type: 'PLACE_STONE', payload: { row: number, col: number } }
+    | { type: 'AI_MOVE', payload: { row: number, col: number } }
+    | { type: 'RESET_GAME', payload?: { gameMode?: GameMode, isPrivate?: boolean, isRematch?: boolean } }
+    | { type: 'SET_BOARD', payload: (Player | null)[][] }
+    | { type: 'APPLY_OPENING', payload: { board: (Player|null)[][], toMove: Player, aiPlayer?: Player, pendingWhiteExtra?: boolean } }
+    | { type: 'SET_GAME_MODE', payload: GameMode }
+    | { type: 'SET_GAME_STATE', payload: GameState }
+    | { type: 'SET_WINNER', payload: { winner: Player, line: {row: number, col: number}[] } }
+    | { type: 'SET_HISTORY', payload: Move[] }
+    | { type: 'SET_AI_PLAYER', payload: Player }
+    | { type: 'SET_USER_PROFILE', payload: Profile | null }
+    | { type: 'SET_AI_KNOWLEDGE', payload: AIKnowledge }
+    | { type: 'ENTER_WHAT_IF' }
+    | { type: 'EXIT_WHAT_IF' }
+    | { type: 'PLACE_WHAT_IF_STONE', payload: { row: number, col: number } }
+    | { type: 'SET_AI_THINKING', payload: boolean }
+    | { type: 'SET_REPLAY_INDEX', payload: number }
+    | { type: 'SET_IS_REPLAYING', payload: boolean }
+    | { type: 'TICK_TIMER' }
+    | { type: 'STOP_WIN_ANIMATION' } // ADDED
+    | { type: 'SHOW_COLOR_SELECT' }
+    | { type: 'HIDE_COLOR_SELECT' }
+    | { type: 'TRIGGER_START_ANIM' }
+    | { type: 'SET_DIFFICULTY', payload: 'easy' | 'normal' }
+    | { type: 'SET_REMATCH_SWAP2_PENDING', payload: boolean };
+
+function gomokuReducer(state: typeof initialState, action: Action): typeof initialState {
+    switch (action.type) {
+        case 'STOP_WIN_ANIMATION': // ADDED
+            return { ...state, isWinningShake: false };
+        case 'SET_BOARD':
+            return { ...state, board: action.payload };
+        case 'APPLY_OPENING': {
+            const next = action.payload.toMove;
+            const ai = action.payload.aiPlayer ?? state.aiPlayer;
+            return {
+                ...state,
+                board: action.payload.board,
+                currentPlayer: next,
+                aiPlayer: ai,
+                startAnimKey: state.startAnimKey + 1,
+                pendingOpening: action.payload.pendingWhiteExtra ? 'white_extra2' : 'none',
+                forbiddenMoves: next === 'white' ? findForbiddenMoves(action.payload.board, 'black') : [],
+            };
+        }
+        case 'TRIGGER_START_ANIM':
+            return { ...state, startAnimKey: state.startAnimKey + 1 };
+        case 'SHOW_COLOR_SELECT':
+            // Pause game flow while selecting color
+            return { ...state, showColorSelect: true, gameState: 'waiting' };
+        case 'HIDE_COLOR_SELECT':
+            return { ...state, showColorSelect: false };
+        case 'SET_DIFFICULTY':
+            return { ...state, difficulty: action.payload };
+        case 'SET_REMATCH_SWAP2_PENDING':
+            return { ...state, rematchSwap2Pending: action.payload };
+        case 'SET_HISTORY':
+            return { ...state, history: action.payload };
+        case 'SET_GAME_STATE': {
+            if (action.payload === 'playing' && !state.startTime) {
+                return { ...state, gameState: 'playing', startTime: Date.now() };
+            }
+            return { ...state, gameState: action.payload };
+        }
+        case 'SET_GAME_MODE':
+            return { ...state, gameMode: action.payload };
+        case 'SET_AI_KNOWLEDGE':
+            return { ...state, aiKnowledge: action.payload };
+        case 'TICK_TIMER': {
+            if (state.gameState !== 'playing') return state;
+            const newTime = state.turnTimeRemaining - 100;
+            if (newTime <= 0) {
+                const winner = state.currentPlayer === 'black' ? 'white' : 'black';
+                return {
+                    ...state,
+                    winner,
+                    gameState: 'post-game',
+                    gameDuration: state.startTime ? formatDuration((Date.now() - state.startTime) / 1000) : "",
+                    turnTimeRemaining: 0,
+                    isWinningShake: true, // MODIFIED
+                };
+            }
+            return { ...state, turnTimeRemaining: newTime };
+        }
+        case 'AI_MOVE': {
+            const { row, col } = action.payload;
+            if (row === -1 || col === -1) {
+                return { ...state, isAiThinking: false };
+            }
+
+            const player = state.currentPlayer;
+            if (state.board[row][col] || state.winner || state.gameState !== 'playing') {
+                return { ...state, isAiThinking: false };
+            }
+
+            const newBoard = state.board.map(r => [...r]);
+            newBoard[row][col] = player;
+            const newHistory = [...state.history, { player, row, col }];
+            const winInfo = checkWin(newBoard, player, row, col);
+
+            if (winInfo) {
+                return {
+                    ...state,
+                    board: newBoard,
+                    history: newHistory,
+                    winner: player,
+                    winningLine: winInfo,
+                    gameState: 'post-game',
+                    gameDuration: state.startTime ? formatDuration((Date.now() - state.startTime) / 1000) : "",
+                    isAiThinking: false,
+                    isWinningShake: true, // MODIFIED
+                };
+            }
+            
+            const newTurnTimeLimit = Math.min(MAX_TURN_TIME, state.turnTimeLimit + TIME_INCREMENT);
+
+            return {
+                ...state,
+                board: newBoard,
+                history: newHistory,
+                currentPlayer: player === 'black' ? 'white' : 'black',
+                forbiddenMoves: player === 'white' ? findForbiddenMoves(newBoard, 'black') : [],
+                turnTimeLimit: newTurnTimeLimit,
+                turnTimeRemaining: newTurnTimeLimit,
+                isAiThinking: false,
+            };
+        }
+        case 'PLACE_STONE': {
+            if (state.gameMode === 'pva' && state.currentPlayer === state.aiPlayer) return state;
+            if (state.isAiThinking) return state;
+            const { row, col } = action.payload;
+            const player = state.currentPlayer;
+
+            if (state.board[row][col] || state.winner || state.gameState !== 'playing') return state;
+            if (player === 'black' && state.forbiddenMoves.some(m => m.row === row && m.col === col)) {
+                toast.error('This move is forbidden (3-3 or 4-4).');
+                return state;
+            }
+
+            const newBoard = state.board.map(r => [...r]);
+            newBoard[row][col] = player;
+            const newHistory = [...state.history, { player, row, col }];
+            const winInfo = checkWin(newBoard, player, row, col);
+
+            if (winInfo) {
+                return {
+                    ...state,
+                    board: newBoard,
+                    history: newHistory,
+                    winner: player,
+                    winningLine: winInfo,
+                    gameState: 'post-game',
+                    gameDuration: state.startTime ? formatDuration((Date.now() - state.startTime) / 1000) : "",
+                    isWinningShake: true, // MODIFIED
+                };
+            }
+            // Swap2: allow two extra white stones phase
+            if (player === 'white' && (state.pendingOpening === 'white_extra2' || state.pendingOpening === 'white_extra1')) {
+                const nextPending = state.pendingOpening === 'white_extra2' ? 'white_extra1' : 'none';
+                // During extra white phase, keep white to move until two stones placed
+                const keepWhite = nextPending !== 'none';
+                const nextPlayer: Player = keepWhite ? 'white' : 'black';
+                return {
+                    ...state,
+                    board: newBoard,
+                    history: newHistory,
+                    currentPlayer: nextPlayer,
+                    forbiddenMoves: player === 'white' ? findForbiddenMoves(newBoard, 'black') : [],
+                    pendingOpening: nextPending,
+                    // do not increase timers aggressively during opening adjustment
+                    turnTimeLimit: state.turnTimeLimit,
+                    turnTimeRemaining: state.turnTimeRemaining,
+                };
+            }
+
+            const newTurnTimeLimit = Math.min(MAX_TURN_TIME, state.turnTimeLimit + TIME_INCREMENT);
+
+            return {
+                ...state,
+                board: newBoard,
+                history: newHistory,
+                currentPlayer: player === 'black' ? 'white' : 'black',
+                forbiddenMoves: player === 'white' ? findForbiddenMoves(newBoard, 'black') : [],
+                turnTimeLimit: newTurnTimeLimit,
+                turnTimeRemaining: newTurnTimeLimit,
+            };
+        }
+        case 'RESET_GAME': {
+            const gameMode = action.payload?.gameMode || state.gameMode;
+            const isRematch = !!action.payload?.isRematch;
+            // Rematch: 시작 색상 랜덤. Normal(PvA)에서는 Swap2 유지를 위해 자동 제안 흐름을 진행하기 위해 waiting으로 시작.
+            if (isRematch) {
+                const aiRand: Player = (Math.random() < 0.5 ? 'black' : 'white');
+                const isPva = (gameMode === 'pva');
+                const isNormal = (state.difficulty === 'normal');
+                const useSwap2Flow = isPva && isNormal;
+                return {
+                    ...initialState,
+                    gameMode,
+                    isPrivateGame: action.payload?.isPrivate || false,
+                    gameState: useSwap2Flow ? 'waiting' : 'playing',
+                    startTime: useSwap2Flow ? null : Date.now(),
+                    difficulty: state.difficulty,
+                    aiPlayer: aiRand,
+                    turnTimeLimit: BASE_TURN_TIME,
+                    turnTimeRemaining: BASE_TURN_TIME,
+                    aiKnowledge: state.aiKnowledge,
+                    showColorSelect: false,
+                    rematchSwap2Pending: useSwap2Flow,
+                };
+            }
+            // 첫 시작: PvA Normal만 색상 선택 오버레이 사용, Easy는 즉시 시작(사용자=흑, AI=백)
+            const isPvaNormal = (gameMode === 'pva' && state.difficulty === 'normal');
+            const waitStart = (isPvaNormal || gameMode === 'pvo' || gameMode === 'spectate');
+            return {
+                ...initialState,
+                gameMode,
+                isPrivateGame: action.payload?.isPrivate || false,
+                gameState: waitStart ? 'waiting' : 'playing',
+                startTime: waitStart ? null : Date.now(),
+                difficulty: state.difficulty,
+                aiPlayer: gameMode === 'pva'
+                  ? (state.difficulty === 'easy' ? 'white' : state.aiPlayer)
+                  : (Math.random() < 0.5 ? 'black' : 'white'),
+                turnTimeLimit: BASE_TURN_TIME,
+                turnTimeRemaining: BASE_TURN_TIME,
+                aiKnowledge: state.aiKnowledge, // Preserve loaded knowledge
+                showColorSelect: isPvaNormal,
+            };
+        }
+        case 'SET_AI_PLAYER':
+            return { ...state, aiPlayer: action.payload };
+        case 'SET_USER_PROFILE':
+            return { ...state, userProfile: action.payload };
+        case 'ENTER_WHAT_IF': {
+            const size = state.board.length || BOARD_SIZE;
+            const replayBoard = Array(size).fill(null).map(() => Array(size).fill(null));
+            for (let i = 0; i < state.replayMoveIndex; i++) {
+                if (state.history[i]) replayBoard[state.history[i].row][state.history[i].col] = state.history[i].player;
+            }
+            const nextPlayer = state.replayMoveIndex % 2 === 0 ? 'black' : 'white';
+            return {
+                ...state,
+                isWhatIfMode: true,
+                whatIfBoard: replayBoard,
+                whatIfPlayer: nextPlayer,
+                aiPlayer: nextPlayer,
+                whatIfWinner: null,
+                whatIfWinningLine: null,
+                whatIfLastMove: null,
+            };
+        }
+        case 'EXIT_WHAT_IF':
+            return { 
+                ...state, 
+                isWhatIfMode: false, 
+                whatIfBoard: null, 
+                whatIfWinner: null, 
+                whatIfWinningLine: null,
+                whatIfLastMove: null,
+            };
+        case 'PLACE_WHAT_IF_STONE': {
+            if (!state.whatIfBoard || state.isAiThinking || state.whatIfWinner) return state;
+            const { row, col } = action.payload;
+            if (state.whatIfBoard[row][col]) return state;
+
+            const player = state.whatIfPlayer;
+            const newBoard = state.whatIfBoard.map(r => [...r]);
+            newBoard[row][col] = player;
+            const winInfo = checkWin(newBoard, player, row, col);
+
+            if (winInfo) {
+                return {
+                    ...state,
+                    whatIfBoard: newBoard,
+                    whatIfWinner: player,
+                    whatIfWinningLine: winInfo,
+                    whatIfLastMove: { player, row, col },
+                };
+            }
+
+            return {
+                ...state,
+                whatIfBoard: newBoard,
+                whatIfPlayer: player === 'black' ? 'white' : 'black',
+                whatIfLastMove: { player, row, col },
+            };
+        }
+        case 'SET_AI_THINKING':
+            return { ...state, isAiThinking: action.payload };
+        case 'SET_REPLAY_INDEX':
+            return { ...state, replayMoveIndex: action.payload };
+        case 'SET_IS_REPLAYING':
+            return { ...state, isReplaying: action.payload };
+        default:
+            return state;
+    }
+}
+export const useGomoku = (initialGameMode: GameMode, onExit: () => void, spectateRoomId: string | null, replayGame: Game | null) => {
+    const [state, dispatch] = useReducer(gomokuReducer, {
+        ...initialState,
+        gameMode: initialGameMode,
+        // PVA도 초기에는 색상 선택을 위해 'waiting'으로 시작 (타이머/AI 정지)
+        gameState: replayGame ? 'replay' : ((initialGameMode === 'pvo' || initialGameMode === 'spectate' || initialGameMode === 'pva') ? 'waiting' : 'playing'),
+        history: replayGame ? replayGame.moves : [],
+        startTime: (initialGameMode !== 'pvo' && initialGameMode !== 'spectate' && !replayGame) ? Date.now() : null
+    });
+
+    const { t } = useTranslation();
+    const { user } = useAuth();
+    const [isGameSaved, setIsGameSaved] = useState(false);
+    const [eloUpdated, setEloUpdated] = useState(false);
+    const aiWorkerRef = useRef<Worker | null>(null);
+    const socketRef = useRef<Socket | null>(null);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Load replay game data when prop changes
+    useEffect(() => {
+        if (replayGame) {
+            dispatch({ type: 'SET_HISTORY', payload: replayGame.moves });
+            dispatch({ type: 'SET_GAME_STATE', payload: 'replay' });
+            dispatch({ type: 'SET_GAME_MODE', payload: replayGame.game_type });
+        }
+    }, [replayGame]);
+
+    // Save game to database
+    useEffect(() => {
+        const saveGame = async () => {
+            if (state.gameState === 'post-game' && !isGameSaved && user && state.gameMode !== 'pvp' && !replayGame) {
+                setIsGameSaved(true);
+
+                const { data: gameData, error: gameError } = await supabase
+                    .from('games')
+                    .insert({
+                        moves: state.history,
+                        game_type: state.gameMode,
+                        winner_player: state.winner,
+                    })
+                    .select()
+                    .single();
+
+                if (gameError || !gameData) {
+                    toast.error('Failed to save game for replay.');
+                    console.error('Error saving game:', gameError);
+                    return;
+                }
+
+                const newGameId = gameData.id;
+
+                const { error: replayError } = await supabase
+                    .from('user_replays')
+                    .insert({
+                        user_id: user.id,
+                        game_id: newGameId,
+                    });
+
+                if (replayError) {
+                    toast.error('Failed to associate replay with user.');
+                    console.error('Error saving user_replay:', replayError);
+                } else {
+                    toast.success('Game saved to your replays!');
+                }
+            }
+        };
+
+        saveGame();
+    }, [state.gameState, isGameSaved, user, state.gameMode, state.history, state.winner, replayGame]);
+
+    // ELO Update for PVA (normal difficulty): win +30, lose -29
+    useEffect(() => {
+        const applyPvaElo = async () => {
+            if (eloUpdated) return;
+            if (state.gameState !== 'post-game') return;
+            if (!user) return;
+            if (state.gameMode !== 'pva') return;
+            if (state.difficulty !== 'normal') return;
+            const userColor: Player = state.aiPlayer === 'white' ? 'black' : 'white';
+            const win = state.winner === userColor;
+            const delta = win ? 30 : -29;
+            // fetch current, then update to avoid race
+            const { data } = await supabase.from('profiles').select('elo_rating').eq('id', user.id).single();
+            const current = (data && (data as any).elo_rating) || 1200;
+            const next = Math.max(0, current + delta);
+            await supabase.from('profiles').update({ elo_rating: next }).eq('id', user.id);
+            setEloUpdated(true);
+        };
+        applyPvaElo();
+    }, [state.gameState, state.gameMode, state.difficulty, state.winner, state.aiPlayer, user, eloUpdated]);
+
+    // Replay board update logic
+    useEffect(() => {
+        if (state.gameState === 'replay') {
+            const size = state.board.length || BOARD_SIZE;
+            const newBoard = Array(size).fill(null).map(() => Array(size).fill(null));
+            for (let i = 0; i < state.replayMoveIndex; i++) {
+                const move = state.history[i];
+                if (move) {
+                    newBoard[move.row][move.col] = move.player;
+                }
+            }
+            dispatch({ type: 'SET_BOARD', payload: newBoard });
+        }
+    }, [state.replayMoveIndex, state.gameState, state.history]);
+
+    // Replay auto-play logic
+    useEffect(() => {
+        let playInterval: NodeJS.Timeout | null = null;
+        if (state.isReplaying && state.replayMoveIndex < state.history.length) {
+            playInterval = setInterval(() => {
+                dispatch({ type: 'SET_REPLAY_INDEX', payload: state.replayMoveIndex + 1 });
+            }, 1000);
+        } else if (state.isReplaying) {
+            dispatch({ type: 'SET_IS_REPLAYING', payload: false });
+        }
+
+        return () => {
+            if (playInterval) {
+                clearInterval(playInterval);
+            }
+        };
+    }, [state.isReplaying, state.replayMoveIndex, state.history.length, dispatch]);
+
+
+    // Game Timer Logic (PVA and PVO) — paused while color selection overlay is visible
+    useEffect(() => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+
+        // Pause timer only if Normal difficulty is showing the color selection overlay
+        const overlayBlocking = (state.difficulty === 'normal' && state.showColorSelect);
+        if ((state.gameMode === 'pva' || state.gameMode === 'pvo') && state.gameState === 'playing' && !state.winner && !overlayBlocking) {
+            timerRef.current = setInterval(() => {
+                dispatch({ type: 'TICK_TIMER' });
+            }, 100);
+        }
+
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+            }
+        };
+    }, [state.currentPlayer, state.gameState, state.winner, state.gameMode, state.showColorSelect, state.difficulty]);
+
+    // AI Turn Logic (Now using external AI server) with strict deadline protection
+    useEffect(() => {
+        const getAiMoveFromServer = async () => {
+            if (state.gameMode !== 'pva' || state.currentPlayer !== state.aiPlayer || state.winner || state.gameState !== 'playing' || state.isAiThinking) {
+                return;
+            }
+
+            dispatch({ type: 'SET_AI_THINKING', payload: true });
+
+            try {
+                // Compute a strict safe budget so AI always replies before our turn timer expires
+                // Normal = full-power AI under turn timer: give it almost all remaining time
+                const bufferMs = 200; // safety margin for network/processing
+                const easy = state.difficulty === 'easy';
+                const safeRemain = Math.max(500, (state.turnTimeRemaining || 0) - bufferMs);
+                const maxThink = easy ? 1000 : Math.max(800, safeRemain);
+
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), Math.max(300, maxThink + 150));
+
+                const payload = {
+                    board: state.board,
+                    player: state.currentPlayer,
+                    moves: state.history,
+                    timeLeftMs: maxThink,
+                    turnLimitMs: maxThink,
+                    turnEndsAt: Date.now() + maxThink,
+                    forceThinkTimeMs: easy ? 1000 : undefined,
+                };
+
+                const resp = await fetch('/api/get-move', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal,
+                });
+                clearTimeout(timeout);
+
+                if (!resp.ok) throw new Error(`AI status ${resp.status}`);
+                const data = await resp.json();
+                if (data?.move && Number.isInteger(data.move[0]) && Number.isInteger(data.move[1])) {
+                    dispatch({ type: 'AI_MOVE', payload: { row: data.move[0], col: data.move[1] } });
+                } else {
+                    throw new Error('Invalid AI response body');
+                }
+
+            } catch (error) {
+                console.error("Error fetching AI move:", error);
+                // Fallback: choose a smarter local heuristic move to avoid flag-fall
+                try {
+                    const size = state.board.length || 15;
+                    const board = state.board;
+                    const me: Player = state.currentPlayer;
+                    const opp: Player = me === 'black' ? 'white' : 'black';
+
+                    const emptyMoves: { r:number; c:number }[] = [];
+                    for (let r=0;r<size;r++) for (let c=0;c<size;c++) if (!board[r][c]) emptyMoves.push({r,c});
+
+                    const checkWinMove = (r:number,c:number,p:Player) => {
+                        board[r][c] = p;
+                        const win = !!checkWin(board, p, r, c);
+                        board[r][c] = null;
+                        return win;
+                    };
+
+                    // 1) Immediate win
+                    for (const m of emptyMoves) if (checkWinMove(m.r, m.c, me)) {
+                        dispatch({ type: 'AI_MOVE', payload: { row: m.r, col: m.c } }); return;
+                    }
+                    // 2) Immediate block
+                    for (const m of emptyMoves) if (checkWinMove(m.r, m.c, opp)) {
+                        dispatch({ type: 'AI_MOVE', payload: { row: m.r, col: m.c } }); return;
+                    }
+
+                    // 3) Heuristic: prefer moves that extend lines with open ends; slight center bias
+                    const dirs = [ [1,0],[0,1],[1,1],[1,-1] ] as const;
+                    const center = Math.floor(size/2);
+                    function lineScore(r:number,c:number,p:Player){
+                        let best = 0;
+                        for (const [dx,dy] of dirs){
+                            let cnt1=0, rr=r+dy, cc=c+dx;
+                            while(rr>=0&&cc>=0&&rr<size&&cc<size&&board[rr][cc]===p){cnt1++; rr+=dy; cc+=dx;}
+                            const open1 = (rr>=0&&cc>=0&&rr<size&&cc<size&&board[rr][cc]==null)?1:0;
+                            let cnt2=0; rr=r-dy; cc=c-dx;
+                            while(rr>=0&&cc>=0&&rr<size&&cc<size&&board[rr][cc]===p){cnt2++; rr-=dy; cc-=dx;}
+                            const open2 = (rr>=0&&cc>=0&&rr<size&&cc<size&&board[rr][cc]==null)?1:0;
+                            const len = 1+cnt1+cnt2;
+                            const openEnds = open1+open2; // 0..2
+                            // score favors longer contiguous lines and open ends
+                            best = Math.max(best, len*10 + openEnds*3);
+                        }
+                        // slight center bias
+                        const dist = Math.abs(r-center)+Math.abs(c-center);
+                        return best - dist*0.2;
+                    }
+                    let bestMove = null as { r:number; c:number; s:number } | null;
+                    for (const m of emptyMoves){
+                        // consider small ring around last move first
+                        const last = state.history[state.history.length-1];
+                        if (last && Math.abs(m.r-last.row)>2 && Math.abs(m.c-last.col)>2) continue;
+                        const sMe = lineScore(m.r,m.c,me);
+                        const sOpp = lineScore(m.r,m.c,opp)*0.8;
+                        const s = sMe + sOpp;
+                        if (!bestMove || s>bestMove.s) bestMove = { r:m.r, c:m.c, s };
+                    }
+                    if (!bestMove){
+                        // fallback to global scan
+                        for (const m of emptyMoves){
+                            const s = lineScore(m.r,m.c,me);
+                            if (!bestMove || s>bestMove.s) bestMove = { r:m.r, c:m.c, s };
+                        }
+                    }
+                    if (bestMove) dispatch({ type: 'AI_MOVE', payload: { row: bestMove.r, col: bestMove.c } });
+                    else {
+                        const mid = Math.floor(size/2);
+                        dispatch({ type: 'AI_MOVE', payload: { row: mid, col: mid } });
+                    }
+                } catch (e) {
+                    console.error('Fallback AI move failed:', e);
+                    toast.error('AI move timed out.');
+                    dispatch({ type: 'SET_AI_THINKING', payload: false });
+                }
+            }
+        };
+
+        getAiMoveFromServer();
+
+    }, [state.currentPlayer, state.gameMode, state.aiPlayer, state.winner, state.gameState, state.board, state.turnTimeRemaining, state.turnTimeLimit, state.difficulty, dispatch]);
+
+    // What If AI Turn Logic
+    useEffect(() => {
+        if (state.isWhatIfMode && state.whatIfPlayer === state.aiPlayer && state.whatIfBoard && !state.isAiThinking) {
+            dispatch({ type: 'SET_AI_THINKING', payload: true });
+            aiWorkerRef.current?.postMessage({ 
+                board: state.whatIfBoard, 
+                player: state.whatIfPlayer, 
+                knowledge: state.aiKnowledge,
+            });
+        }
+    }, [state.isWhatIfMode, state.whatIfPlayer, state.whatIfBoard, state.aiPlayer, state.isAiThinking, state.aiKnowledge]);
+    
+    // Game Start Logic (no automatic Swap2; PVA shows color select overlay)
+    useEffect(() => {
+        if (!replayGame && (initialGameMode === 'pva' || initialGameMode === 'pvp')) {
+            dispatch({ type: 'RESET_GAME', payload: { gameMode: initialGameMode } });
+        }
+    }, [initialGameMode, replayGame]);
+
+    // Reset flags on new game
+    useEffect(() => {
+        if (state.gameState === 'playing') {
+            setEloUpdated(false);
+        }
+    }, [state.gameState]);
+
+    // User Profile Fetching
+    useEffect(() => {
+        const fetchUserProfile = async () => {
+            if (!user) return;
+            const { data } = await supabase
+              .from('profiles')
+              .select('id, username, elo_rating, is_supporter, nickname_color, badge_color, banner_color')
+              .eq('id', user.id)
+              .single();
+            dispatch({ type: 'SET_USER_PROFILE', payload: data as any });
+        };
+        fetchUserProfile();
+    }, [user]);
+
+    // Effect to turn off the winning shake animation
+    useEffect(() => {
+        if (state.isWinningShake) {
+            const timer = setTimeout(() => {
+                dispatch({ type: 'STOP_WIN_ANIMATION' });
+            }, 500); // Duration of the CSS animation
+            return () => clearTimeout(timer);
+        }
+    }, [state.isWinningShake]);
+
+    return { state, dispatch, socketRef };
+};
+

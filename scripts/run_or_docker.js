@@ -1,9 +1,18 @@
 #!/usr/bin/env node
 const { spawnSync, spawn } = require('child_process');
+const path = require('path');
+const dotenv = require('dotenv');
 
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { stdio: 'inherit', shell: false, ...opts });
   return res.status === 0;
+}
+
+// Load local env files if present (pipeline expects Supabase creds, etc.)
+const envFiles = ['.env', '.env.supabase'];
+for (const file of envFiles) {
+  const resolved = path.resolve(__dirname, '..', file);
+  dotenv.config({ path: resolved, override: false });
 }
 
 function main() {
@@ -45,4 +54,5 @@ function main() {
 }
 
 main();
+
 

@@ -27,9 +27,9 @@ const GATING_ENABLED = (process.env.GATING_ENABLED || 'true').toLowerCase() === 
 const PAST_MODELS_DIR = process.env.PAST_MODELS_DIR || path.resolve(BASE_DIR, 'past_models');
 const SAVE_PAST_MODEL = (process.env.SAVE_PAST_MODEL || 'true').toLowerCase() === 'true';
 const BATCH_SIZE = Number(process.env.BATCH_SIZE || 64);
-const EPOCHS = Number(process.env.EPOCHS || 2);
-const STEPS_PER_EPOCH = Number(process.env.STEPS_PER_EPOCH || 2000);
-const LEARNING_RATE = Number(process.env.LEARNING_RATE || 1e-3);
+const EPOCHS = Number(process.env.EPOCHS || 4);
+const STEPS_PER_EPOCH = Number(process.env.STEPS_PER_EPOCH || 4000);
+const LEARNING_RATE = Number(process.env.LEARNING_RATE || 5e-4);
 const TEACHER_TEMP = Number(process.env.TEACHER_TEMP || 1.5);
 const ALPHA_TEACHER_POLICY = Number(process.env.ALPHA_TEACHER_POLICY || 0.7); // vs MCTS policy
 const BETA_TEACHER_VALUE = Number(process.env.BETA_TEACHER_VALUE || 0.7);       // vs final value

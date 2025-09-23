@@ -1,21 +1,28 @@
 {
-  "ts": "2025-09-19T21:14:19.186Z",
-  "phase": "book_import_start",
+  "ts": "2025-09-23T01:50:17.213Z",
+  "phase": "arena_start",
   "cycle": 1,
-  "error": "import_book: Error: Import Opening Book into Supabase failed with code 1",
+  "error": "arena: Error: Arena Gating failed with code 3221226505",
   "selfPlay": {
-    "workers": 1
+    "workers": 4,
+    "samplesTotal": 1084,
+    "lastSave": "2025-09-23T00:07:21.924Z"
   },
   "book": {
     "entries": 1,
     "imported": true
   },
   "arena": {
-    "played": 6,
-    "total": 6,
-    "candWins": 2,
-    "prodWins": 4,
+    "played": 10,
+    "total": 200,
+    "candWins": 3,
+    "prodWins": 7,
     "draws": 0,
     "promoted": false
+  },
+  "distill": {
+    "epoch": 4,
+    "epochs": 4,
+    "lastSaved": "2025-09-23T00:09:03.882Z"
   }
 }

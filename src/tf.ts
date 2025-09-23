@@ -18,26 +18,66 @@ function ensureTensorflowDll(pkgName: string) {
     const libDir = path.join(baseDir, 'lib');
     const targetDir = path.join(libDir, 'napi-v8');
     if (!fss.existsSync(targetDir)) return;
+
+    const currentPath = process.env.PATH || '';
+    if (!currentPath.split(';').some((seg) => seg.toLowerCase() === targetDir.toLowerCase())) {
+      process.env.PATH = `${targetDir};${currentPath}`;
+    }
+
     const targetDll = path.join(targetDir, 'tensorflow.dll');
-    if (fss.existsSync(targetDll)) return;
-    const entries = fss.readdirSync(libDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const candidate = path.join(libDir, entry.name, 'tensorflow.dll');
-      if (fss.existsSync(candidate)) {
-        try {
-          fss.copyFileSync(candidate, targetDll);
-          if (!process.env.SUPPRESS_TF_WARN) {
-            console.log(`[TF] Patched tensorflow.dll into ${targetDir}`);
-          }
-          return;
-        } catch {}
+    if (!fss.existsSync(targetDll)) {
+      const entries = fss.readdirSync(libDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const candidate = path.join(libDir, entry.name, 'tensorflow.dll');
+        if (fss.existsSync(candidate)) {
+          try {
+            fss.copyFileSync(candidate, targetDll);
+            if (!process.env.SUPPRESS_TF_WARN) {
+              console.log(`[TF] Patched tensorflow.dll into ${targetDir}`);
+            }
+            break;
+          } catch {}
+        }
+      }
+    }
+
+    const zlibTarget = path.join(targetDir, 'zlibwapi.dll');
+    if (!fss.existsSync(zlibTarget)) {
+      const candidates: string[] = [
+        path.join(libDir, 'napi-v10', 'zlibwapi.dll'),
+        path.join(libDir, 'napi-v9', 'zlibwapi.dll'),
+        path.join(libDir, 'napi-v8', 'zlibwapi.dll'),
+        path.join(baseDir, 'deps', 'lib', 'zlibwapi.dll'),
+        process.env.ZLIBWAPI_PATH ?? '',
+        path.join(process.cwd(), 'zlibwapi.dll'),
+      ];
+      try {
+        const cpuPkg = require.resolve('@tensorflow/tfjs-node/package.json');
+        const cpuLibDir = path.join(path.dirname(cpuPkg), 'lib');
+        for (const dirName of ['napi-v10', 'napi-v9', 'napi-v8']) {
+          candidates.push(path.join(cpuLibDir, dirName, 'zlibwapi.dll'));
+        }
+      } catch {}
+      for (const candidate of candidates) {
+        if (!candidate || candidate === zlibTarget) continue;
+        if (fss.existsSync(candidate)) {
+          try {
+            fss.copyFileSync(candidate, zlibTarget);
+            if (!process.env.SUPPRESS_TF_WARN) {
+              console.log(`[TF] Patched zlibwapi.dll into ${targetDir}`);
+            }
+            break;
+          } catch {}
+        }
       }
     }
   } catch {}
 }
 
+
 function loadTfjsNode(moduleName: string) {
+  ensureTensorflowDll(moduleName);
   try {
     return require(moduleName);
   } catch (err) {

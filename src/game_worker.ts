@@ -1,7 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import tf from './tf';
 import type * as TFT from '@tensorflow/tfjs';
-import { pathToFileURL } from 'node:url';
+import * as path from 'path';
 import {
   findBestMoveNN,
   checkWin,
@@ -96,7 +96,12 @@ function boardToInputTensor(board: Board, player: Player): TFT.Tensor4D {
 
 /** Windows 경로 안전히 파일 URL로 변환 */
 function toFileURL(p: string): string {
-  return pathToFileURL(p).href;
+  const resolved = path.resolve(p).replace(/\\/g, '/');
+  if (/^[a-zA-Z]:\//.test(resolved)) {
+    return `file://${resolved}`;
+  }
+  const prefixed = resolved.startsWith('/') ? resolved : `/${resolved}`;
+  return `file://${prefixed}`;
 }
 
 /** 레이어 모델 로드 + 워밍업(첫 predict에서 그래프 컴파일되는 비용 선지불) */

@@ -1,0 +1,19 @@
+[Unit]
+Description=Gomoku AI Inference Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/gomoku-ai/server.env
+WorkingDirectory=/opt/gomoku-ai
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=5
+User=gomoku
+Group=gomoku
+StandardOutput=append:/var/log/gomoku-ai/server.log
+StandardError=append:/var/log/gomoku-ai/server.err.log
+
+[Install]
+WantedBy=multi-user.target

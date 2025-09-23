@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
+    "@google-cloud/storage": "^7.17.1",
     "@supabase/supabase-js": "^2.57.0",
     "@tensorflow/tfjs": "4.19.0",
     "@tensorflow/tfjs-node": "^4.22.0",
@@ -34,6 +35,6 @@
     "socket.io-client": "^4.8.1"
   },
   "optionalDependencies": {
-    "@tensorflow/tfjs-node-gpu": "4.19.0"
+    "@tensorflow/tfjs-node-gpu": "^4.22.0"
   }
 }

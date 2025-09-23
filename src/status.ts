@@ -46,6 +46,12 @@ export type Status = {
   upload?: {
     publicUrl?: string;
     ok?: boolean;
+    gcs?: {
+      ok?: boolean;
+      versionPath?: string;
+      latestPath?: string;
+      publicUrl?: string;
+    };
   };
   book?: {
     entries?: number;

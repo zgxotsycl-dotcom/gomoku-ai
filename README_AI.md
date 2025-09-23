@@ -30,8 +30,8 @@ Run Self-Play Pipeline
   - `REPLAY_BUFFER_DIR` default `replay_buffer`
   - `PROD_MODEL_DIR` default `gomoku_model_prod`
   - `PAST_MODELS_DIR` default `past_models`
-  - `SELF_PLAY_DURATION_MS` default 300000
-  - `MCTS_THINK_TIME_MS` default 1600
+  - `SELF_PLAY_DURATION_MS` default 1800000
+  - `MCTS_THINK_TIME_MS` default 4000
   - `EXPLORATION_MOVES` default 15
   - `RUN_DISTILLATION` default `true` (run KD after data gen)
   - `UPLOAD_MODEL_AFTER` default `true` (upload to Supabase after pipeline)
@@ -66,8 +66,8 @@ Distillation Training (Knowledge Distillation)
 - Script: `node dist/distill_student.js`
 - Uses JSONL from `replay_buffer/` with fields: `state`, `player`, `mcts_policy`, `teacher_policy`, `teacher_value`, `final_value`.
 - Env vars:
-  - `BATCH_SIZE` default 64, `EPOCHS` default 2, `STEPS_PER_EPOCH` default 2000
-  - `LEARNING_RATE` default 1e-3
+  - `BATCH_SIZE` default 64, `EPOCHS` default 4, `STEPS_PER_EPOCH` default 4000
+  - `LEARNING_RATE` default 5e-4
   - `TEACHER_TEMP` default 1.5 (soften teacher policy)
   - `ALPHA_TEACHER_POLICY` default 0.7 (mix teacher vs MCTS policy)
   - `BETA_TEACHER_VALUE` default 0.7 (mix teacher vs final value)

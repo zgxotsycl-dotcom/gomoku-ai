@@ -105,6 +105,55 @@ function canonicalizeBoard(board: (Player | null)[][]): { hash: string; t: Trans
   return { hash: bestHash, t: bestT };
 }
 
+async function loadOpeningBook(): Promise<void> {
+  const seen = new Set<string>();
+  const candidates: Array<{ filePath: string; label: string }> = [];
+  const pushCandidate = (inputPath: string, label: string) => {
+    const resolved = path.isAbsolute(inputPath) ? inputPath : path.resolve(BASE_DIR, inputPath);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    candidates.push({ filePath: resolved, label });
+  };
+
+  const envPath = process.env.OPENING_BOOK_PATH;
+  if (envPath) pushCandidate(envPath, 'OPENING_BOOK_PATH');
+  pushCandidate(path.resolve(BASE_DIR, '..', 'opening_book_generated.json'), 'opening_book_generated.json');
+  pushCandidate(path.resolve(BASE_DIR, '..', 'opening_book.json'), 'opening_book.json');
+
+  for (const { filePath, label } of candidates) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const raw = await fsp.readFile(filePath, 'utf-8');
+      const entries = JSON.parse(raw) as Array<{ board_hash: string; best_move: [number, number]; move_count?: number }>;
+      const filtered: { [hash: string]: [number, number] } = Object.create(null);
+      let kept = 0;
+      for (const entry of entries) {
+        const board = hashToBoard(entry.board_hash);
+        if (board.length !== SERVER_BOARD_SIZE) continue;
+        const { hash, t } = canonicalizeBoard(board);
+        const [rr, cc] = transformRC(entry.best_move[0], entry.best_move[1], board.length, t);
+        filtered[hash] = [rr, cc];
+        kept++;
+      }
+      if (kept > 0) {
+        openingBook = filtered;
+        const skipped = entries.length - kept;
+        console.log(`[Server] Opening book loaded (${kept} entries) from ${label}.`);
+        if (skipped > 0) {
+          console.warn(`[Server] Skipped ${skipped} entries from ${label} due to board-size mismatch.`);
+        }
+        return;
+      }
+      console.warn(`[Server] No entries in ${label} matched board size ${SERVER_BOARD_SIZE}.`);
+    } catch (e) {
+      console.warn(`[Server] Failed to load opening book from ${label}:`, e);
+    }
+  }
+
+  openingBook = null;
+  console.warn('[Server] Opening book not loaded; all candidates unavailable or mismatched.');
+}
+
 async function loadModel(): Promise<TFT.LayersModel> {
   const useRemote = !!(MODEL_URL && MODEL_URL.startsWith('http'));
   let loadHref: string;
@@ -167,28 +216,8 @@ async function start() {
   const app = fastify({ logger: false });
   await app.register(cors, { origin: true });
 
-  // Load opening book if available and index canonically
-  try {
-    const bookPath = path.resolve(BASE_DIR, '..', 'opening_book.json');
-    const exists = fs.existsSync(bookPath);
-    if (exists) {
-      const raw = await fsp.readFile(bookPath, 'utf-8');
-      const arr = JSON.parse(raw) as Array<{ board_hash: string; best_move: [number, number]; move_count?: number }>;
-      const bookCanon: { [hash: string]: [number, number] } = Object.create(null);
-      for (const e of arr) {
-        const b = hashToBoard(e.board_hash);
-        const { hash, t } = canonicalizeBoard(b);
-        // move needs to be transformed to canonical orientation as well
-        const [rr, cc] = transformRC(e.best_move[0], e.best_move[1], b.length, t);
-        bookCanon[hash] = [rr, cc];
-      }
-      openingBook = bookCanon;
-      console.log(`[Server] Opening book loaded: ${Object.keys(bookCanon).length} canonical entries.`);
-    }
-  } catch (e) {
-    console.warn('[Server] Failed to load opening_book.json:', e);
-  }
-
+  await loadOpeningBook();
+
   app.get('/health', async () => {
     try {
       await ensureModel();

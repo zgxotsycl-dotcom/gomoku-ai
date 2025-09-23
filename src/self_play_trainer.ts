@@ -15,10 +15,10 @@ const SAVE_INTERVAL_MS = Number(process.env.SAVE_INTERVAL_MS || 30_000);
 const OUTPUT_DIR = process.env.REPLAY_BUFFER_DIR || path.resolve(BASE_DIR, 'replay_buffer');
 const PROD_MODEL_DIR = process.env.PROD_MODEL_DIR || path.resolve(BASE_DIR, 'gomoku_model_prod');
 const PAST_MODELS_DIR = process.env.PAST_MODELS_DIR || path.resolve(BASE_DIR, 'past_models');
-const SELF_PLAY_DURATION_MS = Number(process.env.SELF_PLAY_DURATION_MS || 5 * 60 * 1000);
-const PAST_MODEL_PROBABILITY = Number(process.env.PAST_MODEL_PROBABILITY || 0.3);
+const SELF_PLAY_DURATION_MS = Number(process.env.SELF_PLAY_DURATION_MS || 30 * 60 * 1000);
+const PAST_MODEL_PROBABILITY = Number(process.env.PAST_MODEL_PROBABILITY || 0.5);
 const BOARD_SIZE = Number(process.env.BOARD_SIZE || 15);
-const MCTS_THINK_TIME_MS = Number(process.env.MCTS_THINK_TIME_MS || 3200);
+const MCTS_THINK_TIME_MS = Number(process.env.MCTS_THINK_TIME_MS || 4000);
 const EXPLORATION_MOVES = Number(process.env.EXPLORATION_MOVES || 15);
 
 // -------- State --------

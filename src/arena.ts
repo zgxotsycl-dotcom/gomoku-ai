@@ -16,10 +16,10 @@ const BASE_DIR = process.env.APP_DIR || path.resolve(__dirname, '..');
 const PROD_DIR = process.env.PROD_MODEL_DIR || path.resolve(BASE_DIR, 'gomoku_model_prod');
 const CANDIDATE_DIR = process.env.CANDIDATE_SAVE_DIR || path.resolve(BASE_DIR, 'gomoku_model_candidate');
 const PAST_MODELS_DIR = process.env.PAST_MODELS_DIR || path.resolve(BASE_DIR, 'past_models');
-const GAMES = Number(process.env.ARENA_GAMES || 60);
-const THINK_TIME = Number(process.env.ARENA_THINK_TIME || 1500);
+const GAMES = Number(process.env.ARENA_GAMES || 200);
+const THINK_TIME = Number(process.env.ARENA_THINK_TIME || 3000);
 const BOARD_SIZE = Number(process.env.BOARD_SIZE || 15);
-const WINRATE_THRESHOLD = Number(process.env.WINRATE_THRESHOLD || 0.55);
+const WINRATE_THRESHOLD = Number(process.env.WINRATE_THRESHOLD || 0.6);
 const PROMOTE_ON_PASS = (process.env.PROMOTE_ON_PASS || 'true').toLowerCase() === 'true';
 const LOG_EVAL_TO_SUPABASE = (process.env.LOG_EVAL_TO_SUPABASE || 'true').toLowerCase() === 'true';
 
