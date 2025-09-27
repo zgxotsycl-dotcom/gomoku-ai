@@ -21,6 +21,7 @@ const THINK_TIME = Number(process.env.ARENA_THINK_TIME || 3000);
 const BOARD_SIZE = Number(process.env.BOARD_SIZE || 15);
 const WINRATE_THRESHOLD = Number(process.env.WINRATE_THRESHOLD || 0.6);
 const PROMOTE_ON_PASS = (process.env.PROMOTE_ON_PASS || 'true').toLowerCase() === 'true';
+const EARLY_STOP = (process.env.ARENA_EARLY_STOP || 'true').toLowerCase() === 'true';
 const LOG_EVAL_TO_SUPABASE = (process.env.LOG_EVAL_TO_SUPABASE || 'true').toLowerCase() === 'true';
 
 function ensureSupabaseEnv() {
@@ -121,9 +122,29 @@ async function main() {
     if (res === 0) draws++;
     else if ((res === 'black' && !swap) || (res === 'white' && swap)) candWins++;
     else prodWins++;
-    if ((i + 1) % 10 === 0) {
-      console.log(`Progress: ${i + 1}/${GAMES} | cand=${candWins} prod=${prodWins} draw=${draws}`);
-      await updateStatus({ arena: { played: i + 1, total: GAMES, candWins, prodWins, draws } });
+
+    const played = i + 1;
+    if (played % 10 === 0 || played === GAMES) {
+      console.log(`Progress: ${played}/${GAMES} | cand=${candWins} prod=${prodWins} draw=${draws}`);
+    }
+    if (played % 10 === 0) {
+      await updateStatus({ arena: { played, total: GAMES, candWins, prodWins, draws } });
+    }
+
+    if (EARLY_STOP) {
+      const remaining = GAMES - played;
+      const bestPossible = candWins + remaining;
+      const worstPossible = candWins;
+      const maxWinrate = bestPossible / GAMES;
+      const minWinrate = worstPossible / GAMES;
+      if (minWinrate >= WINRATE_THRESHOLD) {
+        console.log(`Early stop: candidate already above threshold with minimum winrate ${(minWinrate * 100).toFixed(1)}%.`);
+        break;
+      }
+      if (maxWinrate < WINRATE_THRESHOLD) {
+        console.log(`Early stop: candidate can no longer reach threshold (max ${(maxWinrate * 100).toFixed(1)}%).`);
+        break;
+      }
     }
   }
 

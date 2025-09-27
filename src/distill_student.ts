@@ -5,18 +5,11 @@ import * as fss from 'fs';
 import * as path from 'path';
 import * as fse from 'fs-extra';
 import * as readline from 'node:readline';
+import type { TrainingSample, StonePlayer } from './types/training';
+import { createReplaySamplerFromEnv } from './data/replay_sampler';
 import { updateStatus } from './status';
 
-type Player = 'black' | 'white';
-
-type TrainingSample = {
-  state: (Player | null)[][];
-  player: Player;
-  mcts_policy: number[];
-  teacher_policy: number[];
-  teacher_value: number;
-  final_value: -1 | 0 | 1;
-};
+type Player = StonePlayer;
 
 // ---------- Config ----------
 const BASE_DIR = process.env.APP_DIR || path.resolve(__dirname, '..');
@@ -34,6 +27,8 @@ const TEACHER_TEMP = Number(process.env.TEACHER_TEMP || 1.5);
 const ALPHA_TEACHER_POLICY = Number(process.env.ALPHA_TEACHER_POLICY || 0.7); // vs MCTS policy
 const BETA_TEACHER_VALUE = Number(process.env.BETA_TEACHER_VALUE || 0.7);       // vs final value
 const SHUFFLE_FILES = (process.env.SHUFFLE_FILES || 'true').toLowerCase() === 'true';
+const POLICY_LOSS_WEIGHT = Number(process.env.POLICY_LOSS_WEIGHT || 1);
+const VALUE_LOSS_WEIGHT = Number(process.env.VALUE_LOSS_WEIGHT || 1);
 
 // ---------- Utils ----------
 function getBoardSize(board: (Player | null)[][]): number { return board.length; }
@@ -185,7 +180,10 @@ async function train() {
     optimizer: tf.train.adam(LEARNING_RATE),
     loss: { policy_head: 'categoricalCrossentropy', value_head: 'meanSquaredError' },
     metrics: { policy_head: 'accuracy', value_head: 'mae' },
-  });
+  } as any);
+  if (POLICY_LOSS_WEIGHT !== 1 || VALUE_LOSS_WEIGHT !== 1) {
+    (model as any).lossWeights = { policy_head: POLICY_LOSS_WEIGHT, value_head: VALUE_LOSS_WEIGHT };
+  }
 
   const files = await listFiles(REPLAY_BUFFER_DIR);
   const boardSize = Number(process.env.BOARD_SIZE || 15);
@@ -194,6 +192,7 @@ async function train() {
   for (let epoch = 1; epoch <= EPOCHS; epoch++) {
     console.log(`\n[Epoch ${epoch}/${EPOCHS}]`);
     await updateStatus({ distill: { epoch, epochs: EPOCHS } });
+    const sampler = createReplaySamplerFromEnv();
     let step = 0;
     let totalSamples = 0;
     const inputs: any[] = [];
@@ -203,6 +202,7 @@ async function train() {
     for await (const s of sampleStream(files)) {
       // Filter to unified 15x15 (BOARD_SIZE)
       if (!s?.state || s.state.length !== boardSize) continue;
+      if (!sampler.accept(s)) continue;
       // Random symmetry augmentation
       const t: TransformId = (Math.floor(Math.random() * 8) as TransformId);
       const stateT = transformBoard(s.state, t);
@@ -237,19 +237,7 @@ async function train() {
       }
     }
 
-    // Flush tail if any
-    if (inputs.length > 0) {
-      const b = inputs.length;
-      const x = tf.stack(inputs);
-      const yPolicy = tf.tensor2d(polTargets, [b, flat]);
-      const yValue = tf.tensor2d(valTargets.map((v) => [v]), [b, 1]);
-      inputs.splice(0).forEach((t) => t.dispose());
-      polTargets.splice(0); valTargets.splice(0);
-      await model.trainOnBatch(x, { policy_head: yPolicy, value_head: yValue });
-      x.dispose(); yPolicy.dispose(); yValue.dispose();
-    }
-
-    // Save after each epoch (candidate if gating enabled)
+    // Flush tail if any\r\n    if (inputs.length > 0) {\r\n      const b = inputs.length;\r\n      const x = tf.stack(inputs);\r\n      const yPolicy = tf.tensor2d(polTargets, [b, flat]);\r\n      const yValue = tf.tensor2d(valTargets.map((v) => [v]), [b, 1]);\r\n      inputs.splice(0).forEach((t) => t.dispose());\r\n      polTargets.splice(0); valTargets.splice(0);\r\n      await model.trainOnBatch(x, { policy_head: yPolicy, value_head: yValue });\r\n      x.dispose(); yPolicy.dispose(); yValue.dispose();\r\n    }\r\n\r\n    const samplerStats = sampler.stats();\r\n    console.log([Epoch ] sampler kept / samples);\r\n    if (samplerStats.filtered.length > 0) {\r\n      const breakdown = samplerStats.filtered.map((f) => ${f.reason}:).join(', ');\r\n      console.log(  sampler filters => );\r\n    }\r\n\r\n    // Save after each epoch (candidate if gating enabled)
     const targetDir = GATING_ENABLED ? CANDIDATE_SAVE_DIR : SAVE_DIR;
     await fs.rm(targetDir, { recursive: true, force: true });
     await model.save(`file://${targetDir}`);
@@ -276,3 +264,10 @@ train().catch((e) => {
   console.error('Distillation failed:', e);
   process.exitCode = 1;
 });
+
+
+
+
+
+
+

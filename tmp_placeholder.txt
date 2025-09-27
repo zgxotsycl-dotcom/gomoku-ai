@@ -1,0 +1,9 @@
+from pathlib import Path
+
+path = Path('src/components/Board.tsx')
+text = path.read_text(encoding='utf-8')
+old_guard = "    if (!swap2ProposalRef.current) {\r\n      void ensureSwap2Proposal().catch((err) => {\r\n        if (!isAbortError(err)) console.error('Swap2 auto-propose failed:', err);\r\n      });\r\n      return;\r\n    }\r\n    if (swap2SecondPromiseRef.current && !swap2SecondReady) return;\r\n    if (state.showColorSelect) return;\r\n"
+if old_guard not in text:
+    raise SystemExit('Auto guard block not found')
+new_guard = "    if (!swap2ProposalRef.current) {\r\n      void ensureSwap2Proposal().catch((err) => {\r\n        if (!isAbortError(err)) console.error('Swap2 auto-propose failed:', err);\r\n      });\r\n      return;\r\n    }\r\n    if (!swap2SecondReady) {\r\n      void ensureSwap2SecondDecision(swap2ProposalRef.current or None).catch((err) => {\r\n        if (!isAbortError(err)) console.error('Swap2 auto second-step failed:', err);\r\n      });\r\n      return;\r\n    }\r\n    if (state.showColorSelect) return;\r\n"
+# adjust ensure call python syntax to actual TS; we need `??` for TS nullish and `.catch`. We'll craft string separately below in TS.

@@ -1,0 +1,146 @@
+[
+  {
+    "name": "tune-1-b7-f96-lr0.0005-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-2-b7-f96-lr0.0005-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-3-b7-f96-lr0.0003-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-4-b7-f96-lr0.0003-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-5-b7-f128-lr0.0005-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-6-b7-f128-lr0.0005-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-7-b7-f128-lr0.0003-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-8-b7-f128-lr0.0003-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "7",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-9-b9-f96-lr0.0005-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-10-b9-f96-lr0.0005-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-11-b9-f96-lr0.0003-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-12-b9-f96-lr0.0003-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "96",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-13-b9-f128-lr0.0005-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-14-b9-f128-lr0.0005-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0005",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  },
+  {
+    "name": "tune-15-b9-f128-lr0.0003-m3600",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "3600"
+    }
+  },
+  {
+    "name": "tune-16-b9-f128-lr0.0003-m4800",
+    "env": {
+      "RESIDUAL_BLOCKS": "9",
+      "CONV_FILTERS": "128",
+      "MODEL_LEARNING_RATE": "0.0003",
+      "MCTS_THINK_TIME_MS": "4800"
+    }
+  }
+]

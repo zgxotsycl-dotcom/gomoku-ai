@@ -8,7 +8,20 @@
     "docker": "docker compose up -d --build",
     "docker:gpu": "docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build",
     "docker:gpu:quick": "docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.quick.yml up -d --build",
-    "check:tf": "node scripts/check_tf_backend.js"
+    "check:tf": "node scripts/check_tf_backend.js",
+    "data:ingest:pro": "node dist/data/ingest_pro_games.js",
+    "export:status": "node dist/monitor/export_status.js",
+    "docker:gpu:workers": "docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.gpu.workers.yml up -d --build",
+    "pipeline:cycle": "node dist/scripts/pipeline_cycle.js",
+    "data:ingest:psq": "node dist/data/ingest_psq_games.js",
+    "experiments": "node dist/scripts/run_experiments.js",
+    "data:ingest:psq:batch": "node dist/scripts/ingest_psq_batch.js",
+    "report:status": "node dist/scripts/report_status.js",
+    "analyze:psq": "node dist/scripts/analyze_psq.js",
+    "curate:replay": "node dist/scripts/curate_replay_buffer.js",
+    "check:inference": "node dist/scripts/check_inference.js",
+    "tune:hparams": "node dist/scripts/tune_hparams.js",
+    "automation:auto": "node dist/scripts/auto_research.js"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",

@@ -5,6 +5,9 @@ import { updateStatus } from './status';
 const BOARD_SIZE = Number(process.env.BOARD_SIZE || 15);
 const BASE_DIR = process.env.APP_DIR || path.resolve(__dirname, '..');
 const OUTPUT_PATH = process.env.OUTPUT_PATH || path.resolve(BASE_DIR, 'opening_book_generated.json');
+const NEIGHBOR_RADIUS = Math.max(1, Math.floor(Number(process.env.BOOK_NEIGHBOR_RADIUS || 2)));
+const INCLUDE_DIAGONALS = (process.env.BOOK_INCLUDE_DIAGONALS || 'true').toLowerCase() === 'true';
+const MAX_NEIGHBOR_COUNT = Number(process.env.BOOK_MAX_NEIGHBORS || 0); // 0 = no limit
 
 function emptyHash(size: number): string {
   const row = '-'.repeat(size);

@@ -28,3 +28,5 @@ training_scripts/gomoku_model_prod/
 .vscode/
 .idea/
 .DS_Store
+
+experiments/results/

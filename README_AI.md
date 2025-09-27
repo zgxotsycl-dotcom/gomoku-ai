@@ -92,7 +92,7 @@ GPU Option
   - 사전: NVIDIA 드라이버 + NVIDIA Container Toolkit 설치
   - 빌드/실행(GPU): `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build`
   - 컨테이너는 `Dockerfile.gpu`를 사용해 `@tensorflow/tfjs-node-gpu`를 설치/사용합니다.
-  - 런타임 ENV: `TF_FORCE_GPU_ALLOW_GROWTH=1`
+  - 런타임 ENV: TF_FORCE_GPU_ALLOW_GROWTH=1, TF_CUDNN_USE_AUTOTUNE=0 (cuDNN out-of-bounds 회피)
 
 Arena/Evaluations Table
 - A migration adds `public.ai_model_evaluations` to store arena results.
@@ -105,7 +105,7 @@ Opening Book
 - Local server loads `opening_book.json` at repo root and performs symmetry-canonical matching.
 - Build/expand book with NN‑MCTS:
   - `node dist/build_opening_book.js`
-  - Env: `BOOK_DEPTH` (default 3), `BOOK_BRANCHING` (default 4), `BOOK_THINK_TIME` (default 2000ms)
+  - Env: `BOOK_DEPTH` (default 3), `BOOK_BRANCHING` (default 4), `BOOK_THINK_TIME` (default 2000ms), `BOOK_NEIGHBOR_RADIUS` (default 2), `BOOK_INCLUDE_DIAGONALS` (default true), `BOOK_MAX_NEIGHBORS` (default 0 = unlimited)
   - Output: `opening_book_generated.json`
 - Import to Supabase (canonicalized): call Edge Function `import-opening-book` with JSON body from the generated file.
   - Or run `node dist/import_opening_book.js` with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
@@ -155,3 +155,30 @@ Gumroad Webhook (Supporters)
   - Ping/Webhook URL: `https://<SUPABASE_PROJECT_REF>.functions.supabase.co/gumroad-webhook-handler`
   - 체크아웃/리다이렉트에 `user_id=<supabase auth user id>` 쿼리 파라미터를 포함하면, 핑 payload의 `url_params.user_id`로 전달되어 즉시 후원자 플래그가 적용됩니다.
   - 이메일로 매핑도 지원: `email`이 포함된 경우 `get_user_id_by_email` RPC로 사용자 ID를 조회합니다.
+
+## New Utilities
+- Human/Pro game ingestion: `npm run build && node dist/data/ingest_pro_games.js --input <dir> --output replay_buffer` (see docs/data_ingestion.md).
+- Status exporter for monitoring: `node dist/monitor/export_status.js > status.prom` (`EXPORT_FORMAT=json` for JSONL output).
+- Self-play high worker compose: `npm run docker:gpu:workers` (NUM_WORKERS=16 등 고부하 설정).
+- One-shot pipeline cycle: `npm run pipeline:cycle`.
+- Gomocup PSQ ingestion: `npm run build && npm run data:ingest:psq -- --input <psq_dir>` (see docs/data_ingestion.md).
+- Experiment matrix runner: `npm run build && npm run experiments` (configure experiments.json).
+- PSQ batch automation: `npm run build && npm run data:ingest:psq:batch` (processes subdirectories once).
+- Status report summary: `npm run build && npm run report:status`.
+- Strategy hotspot analyzer: `npm run analyze:psq -- --dir <psq_dir>`.
+- Replay buffer curator: `npm run curate:replay`.
+- Inference health check: `npm run check:inference`.
+- Hyperparameter tuner: `npm run tune:hparams` (produces experiments.auto.json).
+- Full automation: `npm run build && npm run automation:auto` (customize via automation.json, override GPU usage with `AUTO_PIPELINE_TF_USE_GPU`).
+
+
+### Self-Play / Training Scheduling
+
+- `MCTS_THINK_TIME_SCHEDULE` — optional comma/semicolon list (e.g. `0:2500,30:1800`) controlling per-move think time overrides.
+- `MCTS_THINK_TIME_JITTER` — fractional jitter (e.g. `0.1` for ±10%) applied to each self-play think time.
+- `POLICY_LOSS_WEIGHT`, `VALUE_LOSS_WEIGHT` — scale distillation losses when you want to emphasise policy vs value.
+- `BALANCE_FINAL_VALUE` and related `BALANCE_*` / `FILTER_*` flags feed the replay sampler (balance wins/draws/losses, filter by move index, policy entropy, etc.).
+- `ARENA_EARLY_STOP` — abort arena matches once the candidate definitely passes/fails the winrate threshold.
+- `EXPERIMENT_RESULTS_DIR` — directory where `npm run scripts:run_experiments` writes JSON summaries.
+
+Defaults for these are supplied in `.env.example` and wired through both CPU/GPU compose files. Update them in your `.env.supabase` or compose overrides before running long experiments.

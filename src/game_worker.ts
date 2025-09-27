@@ -10,6 +10,7 @@ import {
   type PolicyData,
 } from './ai';
 import { performSwap2Negotiation } from './swap2_negotiation';
+import type { TrainingSample, SampleMeta } from './types/training';
 
 /* ======================
  * 설정값 (workerData로 덮어쓰기 가능)
@@ -21,6 +22,53 @@ const MCTS_THINK_TIME_MS: number =
 const EXPLORATION_MOVES: number =
   (workerData?.explorationMoves as number) ?? 15; // 초기 탐험 구간(샘플링)
 const EPS = 1e-8;
+interface ThinkScheduleEntry {
+  move: number;
+  ms: number;
+}
+
+function parseThinkSchedule(raw?: string): ThinkScheduleEntry[] | null {
+  if (!raw) return null;
+  const entries: ThinkScheduleEntry[] = [];
+  for (const part of raw.split(/[;,]/)) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const [moveStr, valueStr] = trimmed.split(':');
+    const move = Number(moveStr?.trim());
+    const ms = Number(valueStr?.trim());
+    if (Number.isFinite(move) && Number.isFinite(ms)) {
+      entries.push({ move: Math.max(0, Math.floor(move)), ms: Math.max(200, Math.floor(ms)) });
+    }
+  }
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => a.move - b.move);
+  return entries;
+}
+
+const THINK_TIME_SCHEDULE = parseThinkSchedule(process.env.MCTS_THINK_TIME_SCHEDULE);
+const THINK_TIME_JITTER = Number(process.env.MCTS_THINK_TIME_JITTER || 0);
+
+function defaultThinkTime(moveIndex: number): number {
+  if (moveIndex <= 6) return Math.max(1000, Math.floor(MCTS_THINK_TIME_MS * 0.8));
+  if (moveIndex <= 30) return Math.max(1200, Math.floor(MCTS_THINK_TIME_MS * 1.2));
+  return Math.max(800, Math.floor(MCTS_THINK_TIME_MS));
+}
+
+function resolveThinkTime(moveIndex: number): number {
+  let base = defaultThinkTime(moveIndex);
+  if (THINK_TIME_SCHEDULE) {
+    for (const entry of THINK_TIME_SCHEDULE) {
+      if (moveIndex >= entry.move) base = entry.ms;
+      else break;
+    }
+  }
+  if (Number.isFinite(THINK_TIME_JITTER) && THINK_TIME_JITTER > 0) {
+    const amplitude = Math.abs(THINK_TIME_JITTER);
+    const delta = base * amplitude * (Math.random() * 2 - 1);
+    base = Math.max(200, base + delta);
+  }
+  return Math.max(200, Math.floor(base));
+}
 
 /* ======================
  * 타입 선언
@@ -32,13 +80,10 @@ type GameResult = -1 | 0 | 1;
 interface TrainingStep {
   state: Board;
   player: Player;
-  mcts_policy: number[];     // 길이 BOARD_SIZE*BOARD_SIZE
-  teacher_policy: number[];  // 모델 예측 정책
-  teacher_value: number;     // 모델 예측 가치(스칼라)
-}
-
-interface TrainingSample extends TrainingStep {
-  final_value: GameResult;
+  mcts_policy: number[];
+  teacher_policy: number[];
+  teacher_value: number;
+  meta?: SampleMeta;
 }
 
 interface WorkerConfig {
@@ -216,32 +261,28 @@ async function runSelfPlayGame(): Promise<void> {
   try {
     const rule = (process.env.OPENING_RULE || 'swap2').toLowerCase();
     if (rule === 'swap2') {
-      const { board: opened, toMove, swapColors } = await performSwap2Negotiation(board, modelWhite); // second player initially is White
+      const { board: opened, toMove, swapColors } = await performSwap2Negotiation(board, modelWhite);
       board = opened;
       player = toMove;
       if (swapColors) {
-        // Second player chose to be Black (or P1 chose White in opt3) -> swap model roles
         models = { black: modelWhite, white: modelBlack };
       }
     }
   } catch {}
   const history: TrainingStep[] = [];
+  const gameId = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  const baseTags = ['self_play'];
 
   const maxMoves = BOARD_SIZE * BOARD_SIZE;
 
   for (let moveCount = 0; moveCount < maxMoves; moveCount++) {
     const currentModel = models[player];
 
-    // 1) 교사(현재 모델) 정책/가치 예측
+    // 1) Teacher prediction
     const teacher = getTeacherPrediction(currentModel, board, player);
 
-    // 2) MCTS로 최적 수/정책 도출
-    // Dynamic think time by game phase to diversify self-play strength
-    let thinkTime = MCTS_THINK_TIME_MS;
-    if (moveCount <= 6) thinkTime = Math.max(1000, Math.floor(MCTS_THINK_TIME_MS * 0.8));
-    else if (moveCount <= 30) thinkTime = Math.max(1200, Math.floor(MCTS_THINK_TIME_MS * 1.2));
-    else thinkTime = Math.max(800, Math.floor(MCTS_THINK_TIME_MS * 1.0));
-
+    // 2) MCTS-guided search with configurable think time
+    const thinkTime = resolveThinkTime(moveCount);
     const { bestMove, policy: mctsPolicy } = await findBestMoveNN(
       currentModel,
       board,
@@ -250,15 +291,13 @@ async function runSelfPlayGame(): Promise<void> {
     );
 
     if (!bestMove || bestMove[0] === -1 || bestMove[1] === -1) {
-      // 둘 곳이 없거나 에러 시 종료(무승부 처리)
       break;
     }
 
-    // 3) MCTS 방문수 기반 타깃 정책 생성
+    // 3) Convert visit counts to policy distribution
     const policyTarget = new Array(BOARD_SIZE * BOARD_SIZE).fill(0);
     let totalVisits = 0;
     for (const p of mctsPolicy as PolicyData[]) totalVisits += p.visits;
-
     if (totalVisits > 0) {
       for (const p of mctsPolicy as PolicyData[]) {
         const moveIndex = p.move[0] * BOARD_SIZE + p.move[1];
@@ -266,19 +305,29 @@ async function runSelfPlayGame(): Promise<void> {
       }
     }
 
-    // 4) 기록(상태, 교사, MCTS 타깃)
+    const isExplorationPhase = moveCount < EXPLORATION_MOVES;
+    const tags = [...baseTags, `player:${player}`];
+    if (isExplorationPhase) tags.push('exploration');
+
+    // 4) Record training snapshot with metadata
     history.push({
       state: cloneBoard(board),
       player,
       mcts_policy: policyTarget,
       teacher_policy: teacher.teacher_policy,
       teacher_value: teacher.teacher_value,
+      meta: {
+        source: 'self_play',
+        gameId,
+        moveIndex: moveCount,
+        tags,
+        extra: { thinkTime, exploration: isExplorationPhase },
+      },
     });
 
-    // 5) 수 선택(초반 탐험: 확률 샘플링, 이후: 최빈/최대방문)
+    // 5) Exploration vs exploitation move selection
     let chosen: Move;
-    if (moveCount < EXPLORATION_MOVES && (mctsPolicy as PolicyData[]).length > 1) {
-      // 방문 비율로 직접 샘플링(텐서 생성 X)
+    if (isExplorationPhase && (mctsPolicy as PolicyData[]).length > 1) {
       const moves = (mctsPolicy as PolicyData[]).map((p) => p.move) as Move[];
       const probs =
         totalVisits > 0
@@ -290,39 +339,70 @@ async function runSelfPlayGame(): Promise<void> {
       chosen = bestMove as Move;
     }
 
-    // 6) 착수 유효성 방어
+    // 6) Validate move
     const [r, c] = chosen;
     if (r < 0 || c < 0 || r >= BOARD_SIZE || c >= BOARD_SIZE || board[r][c] !== null) {
       console.warn(`[Worker ${cfg.workerId ?? '?'}] Illegal move attempted:`, chosen);
-      break; // 무승부 처리
+      break;
     }
 
-    // 7) 보드 업데이트
+    // 7) Apply move
     board[r][c] = player;
 
-    // 8) 승리 체크
+    // 8) Check win
     if (checkWin(board, player, chosen)) {
       const winner = player;
-      const trainingSamples: TrainingSample[] = history.map((h) => ({
-        ...h,
+      const totalMoves = history.length;
+      const blackResult = winner === 'black' ? 1 : -1;
+      const resultTag = `winner:${winner}`;
+      const trainingSamples: TrainingSample[] = history.map((h, idx) => ({
+        state: h.state,
+        player: h.player,
+        mcts_policy: h.mcts_policy,
+        teacher_policy: h.teacher_policy,
+        teacher_value: h.teacher_value,
         final_value: h.player === winner ? 1 : -1,
+        meta: {
+          ...(h.meta ?? {}),
+          source: h.meta?.source ?? 'self_play',
+          gameId,
+          moveIndex: idx,
+          totalMoves,
+          result: blackResult,
+          tags: Array.from(new Set([...(h.meta?.tags ?? []), resultTag])),
+          extra: { ...(h.meta?.extra ?? {}) },
+        },
       }));
       parentPort?.postMessage({ trainingSamples });
       return;
     }
 
-    // 9) 차례 넘기기
+    // 9) Switch player
     player = getOpponent(player);
   }
 
-  // 가득 찼거나 유효 수 없음 → 무승부
-  const trainingSamples: TrainingSample[] = history.map((h) => ({
-    ...h,
+  // Draw or exhausted moves
+  const drawTotalMoves = history.length;
+  const trainingSamples: TrainingSample[] = history.map((h, idx) => ({
+    state: h.state,
+    player: h.player,
+    mcts_policy: h.mcts_policy,
+    teacher_policy: h.teacher_policy,
+    teacher_value: h.teacher_value,
     final_value: 0,
+    meta: {
+      ...(h.meta ?? {}),
+      source: h.meta?.source ?? 'self_play',
+      gameId,
+      moveIndex: idx,
+      totalMoves: drawTotalMoves,
+      result: 0,
+      tags: Array.from(new Set([...(h.meta?.tags ?? []), 'result:draw'])),
+      extra: { ...(h.meta?.extra ?? {}) },
+    },
   }));
   parentPort?.postMessage({ trainingSamples });
 }
-
 /* ======================
  * 실행/메시지 처리
  * ====================== */
@@ -361,3 +441,28 @@ parentPort?.on('message', async (msg) => {
 if (cfg.autostart ?? true) {
   void startGame();
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

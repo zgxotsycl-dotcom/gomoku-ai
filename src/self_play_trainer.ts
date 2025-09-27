@@ -7,6 +7,7 @@ import type * as TFT from '@tensorflow/tfjs';
 import { createDualResNetModel } from './model';
 import { updateStatus } from './status';
 import { customAlphabet } from 'nanoid';
+import type { TrainingSample } from './types/training';
 
 // -------- Config --------
 const BASE_DIR = process.env.APP_DIR || path.resolve(__dirname, '..');
@@ -25,15 +26,6 @@ const EXPLORATION_MOVES = Number(process.env.EXPLORATION_MOVES || 15);
 const nanoid = customAlphabet('1234567890abcdef', 10);
 const WORKER_PATH = path.resolve(__dirname, './game_worker.js');
 let isRunning = false;
-
-type TrainingSample = {
-  state: ('black' | 'white' | null)[][];
-  player: 'black' | 'white';
-  mcts_policy: number[];
-  teacher_policy: number[];
-  teacher_value: number;
-  final_value: -1 | 0 | 1;
-};
 
 async function ensureDirs() {
   await fse.ensureDir(OUTPUT_DIR);
@@ -200,3 +192,5 @@ main().catch((e) => {
   console.error('Self-play trainer failed:', e);
   process.exitCode = 1;
 });
+
+
